@@ -3,7 +3,7 @@ set -euo pipefail
 
 host="${MYSTMON_BUILD_HOST:-192.168.1.72}"
 user="${MYSTMON_BUILD_USER:-}"
-remote_dir="${MYSTMON_REMOTE_DIR:-~/mystmon}"
+remote_dir="${MYSTMON_REMOTE_DIR:-/mnt/ssd/codex/mystmon}"
 start="${1:-}"
 
 target="$host"

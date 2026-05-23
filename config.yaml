@@ -2,22 +2,38 @@ service:
   name: mystmon
   poll_interval_seconds: 21600
   request_timeout_seconds: 10
+  data_dir: /data/mystmon
+  log_window_seconds: 21600
 
 prometheus:
   enabled: true
-  targets:
-    - name: local-node
-      url: http://node-exporter:9100/metrics
+  targets: []
 
 snmp:
-  enabled: true
+  enabled: false
   default_community: public
-  targets:
-    - name: existing-snmp-framework
-      host: 192.168.1.72
-      port: 161
-      community: public
-      oids:
-        sys_uptime: 1.3.6.1.2.1.1.3.0
-        if_number: 1.3.6.1.2.1.2.1.0
+  targets: []
 
+myst:
+  enabled: true
+  docker_socket: unix:///var/run/docker.sock
+  container_name_patterns:
+    - ^myst(\.|$)
+    - ^myst\d+
+  api_probe_enabled: true
+  api_probe_paths:
+    - /healthcheck
+  api_default_port: 4050
+  containers:
+    - name: myst.1.x
+      host: 192.168.1.72
+    - name: myst.12.x
+      host: 192.168.1.72
+    - name: myst.17.x
+      host: 192.168.1.72
+    - name: myst.18.x
+      host: 192.168.1.72
+
+outputs:
+  latest_json_path: /data/mystmon/latest.json
+  snmp_extend_path: /data/mystmon/snmp_extend.txt

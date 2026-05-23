@@ -10,7 +10,7 @@ if ([string]::IsNullOrWhiteSpace($HostName)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($RemoteDir)) {
-    $RemoteDir = "~/mystmon"
+    $RemoteDir = "/mnt/ssd/codex/mystmon"
 }
 
 $target = $HostName

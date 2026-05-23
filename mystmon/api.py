@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI, Response
@@ -47,6 +49,13 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
     async def readings() -> list[dict]:
         return [reading.as_dict() for reading in store.all()]
 
+    @app.get("/api/v1/snapshot")
+    async def snapshot() -> dict:
+        path = Path(app_config.outputs.latest_json_path)
+        if not path.exists():
+            await scheduler.collect_once()
+        return json.loads(path.read_text(encoding="utf-8"))
+
     @app.post("/api/v1/collect")
     async def collect_now() -> dict[str, int]:
         return await scheduler.collect_once()
@@ -60,10 +69,29 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
             ["source_type", "source_name", "metric"],
             registry=registry,
         )
+        node_running = Gauge("mystmon_node_running", "MYST container running state.", ["node"], registry=registry)
+        node_restarts = Gauge("mystmon_node_restart_count", "MYST container restart count.", ["node"], registry=registry)
+        node_uptime = Gauge("mystmon_node_uptime_seconds", "MYST container uptime.", ["node"], registry=registry)
+        node_logs = Gauge("mystmon_node_log_events", "Recent MYST log event counts.", ["node", "event"], registry=registry)
+        node_api = Gauge("mystmon_node_api_up", "MYST TequilAPI health probe state.", ["node"], registry=registry)
 
         for reading in store.all():
             if isinstance(reading.value, (int, float)):
                 gauge.labels(reading.source_type, reading.source_name, reading.metric).set(reading.value)
+
+        snapshot_path = Path(app_config.outputs.latest_json_path)
+        if snapshot_path.exists():
+            snapshot_data = json.loads(snapshot_path.read_text(encoding="utf-8"))
+            for node in snapshot_data.get("nodes", []):
+                name = node.get("name", "unknown")
+                node_running.labels(name).set(1 if node.get("running") else 0)
+                node_restarts.labels(name).set(node.get("restart_count", 0))
+                node_uptime.labels(name).set(node.get("uptime_seconds", 0))
+                for event, value in node.get("log_counts", {}).items():
+                    node_logs.labels(name, event).set(value)
+                api = node.get("api") or {}
+                if api:
+                    node_api.labels(name).set(1 if api.get("up") else 0)
 
         return Response(
             content=generate_latest(registry),
@@ -71,4 +99,3 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
         )
 
     return app
-

@@ -12,6 +12,8 @@ class ServiceConfig(BaseModel):
     name: str = "mystmon"
     poll_interval_seconds: int = Field(default=21600, ge=60)
     request_timeout_seconds: int = Field(default=10, ge=1)
+    data_dir: str = "/data/mystmon"
+    log_window_seconds: int = Field(default=21600, ge=60)
 
 
 class PrometheusTarget(BaseModel):
@@ -45,10 +47,35 @@ class SnmpConfig(BaseModel):
     targets: list[SnmpTarget] = Field(default_factory=list)
 
 
+class MystContainerConfig(BaseModel):
+    name: str
+    host: str = "192.168.1.72"
+    expected_network: str | None = None
+    expected_port_range: str | None = None
+    tequilapi_port: int | None = None
+
+
+class MystCollectorConfig(BaseModel):
+    enabled: bool = True
+    docker_socket: str = "unix:///var/run/docker.sock"
+    container_name_patterns: list[str] = Field(default_factory=lambda: [r"^myst(\.|$)", r"^myst\d+"])
+    api_probe_enabled: bool = True
+    api_probe_paths: list[str] = Field(default_factory=lambda: ["/healthcheck"])
+    api_default_port: int = 4050
+    containers: list[MystContainerConfig] = Field(default_factory=list)
+
+
+class OutputConfig(BaseModel):
+    latest_json_path: str = "/data/mystmon/latest.json"
+    snmp_extend_path: str = "/data/mystmon/snmp_extend.txt"
+
+
 class MystMonConfig(BaseModel):
     service: ServiceConfig = Field(default_factory=ServiceConfig)
     prometheus: PrometheusConfig = Field(default_factory=PrometheusConfig)
     snmp: SnmpConfig = Field(default_factory=SnmpConfig)
+    myst: MystCollectorConfig = Field(default_factory=MystCollectorConfig)
+    outputs: OutputConfig = Field(default_factory=OutputConfig)
 
 
 def load_config(path: str | os.PathLike[str] | None = None) -> MystMonConfig:
@@ -59,4 +86,3 @@ def load_config(path: str | os.PathLike[str] | None = None) -> MystMonConfig:
     with config_path.open("r", encoding="utf-8") as handle:
         raw: dict[str, Any] = yaml.safe_load(handle) or {}
     return MystMonConfig.model_validate(raw)
-

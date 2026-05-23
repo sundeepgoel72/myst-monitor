@@ -1,83 +1,126 @@
 # MystMon 0.72
 
-MystMon is a containerized monitoring bridge with a small HTTP API, Prometheus export, and scheduled SNMP collection. It is designed for setups that already have SNMP devices or an SNMP-based monitoring framework and need a simple service that can poll on a fixed cadence, keep the latest readings, and expose them to Prometheus or API clients.
+MystMon is a lightweight monitoring service for the MYST passive income nodes. It is designed to run on the HP400 management host at `192.168.1.72` from `/mnt/ssd/codex/mystmon`, poll local Docker containers every 6 hours, and expose status through Prometheus, JSON, and SNMP-friendly text output.
 
 ## Features
 
 - Docker-installable service with `docker compose`
 - REST API with OpenAPI docs at `/docs`
 - Prometheus-compatible `/metrics` endpoint
-- Prometheus text endpoint ingestion
-- SNMP v2c polling with a default 6-hour interval
+- Docker/log collector for MYST containers
+- Optional MYST TequilAPI `/healthcheck` probe when mapped locally
+- SNMP-style status file for `snmpd extend` or Telegraf exec input
+- JSON snapshot at `/data/mystmon/latest.json`
 - YAML configuration with environment overrides
 
 ## Quick Start
 
-```powershell
-docker compose up --build
+On `192.168.1.72`:
+
+```bash
+mkdir -p /mnt/ssd/codex
+cd /mnt/ssd/codex
+git clone <your-repo-url> mystmon
+cd mystmon
+docker compose up -d --build
 ```
 
 Then open:
 
-- API docs: `http://localhost:8072/docs`
-- Health: `http://localhost:8072/health`
-- Metrics: `http://localhost:8072/metrics`
+```text
+http://192.168.1.72:8072/docs
+http://192.168.1.72:8072/metrics
+```
+
+From this Windows workspace, after SSH is configured:
+
+```powershell
+.\ops\build-on-linux.ps1 -Start
+```
 
 ## Configuration
 
-MystMon reads `config.yaml` by default. The committed default targets `192.168.1.72` for the existing SNMP framework. Set `MYSTMON_CONFIG=/path/to/config.yaml` to use another file.
+MystMon reads `config.yaml` by default. The committed default targets the known MYST containers on `192.168.1.72`:
 
-The sample config enables both Prometheus ingestion and SNMP collection:
+- `myst.1.x`
+- `myst.12.x`
+- `myst.17.x`
+- `myst.18.x`
 
 ```yaml
 service:
   name: mystmon
   poll_interval_seconds: 21600
+  log_window_seconds: 21600
 
-prometheus:
+myst:
   enabled: true
-  targets:
-    - name: local-node
-      url: http://node-exporter:9100/metrics
+  docker_socket: unix:///var/run/docker.sock
+  api_probe_enabled: true
+  api_probe_paths:
+    - /healthcheck
 
-snmp:
-  enabled: true
-  default_community: public
-  targets:
-    - name: core-switch
-      host: 192.168.1.72
-      port: 161
-      community: public
-      oids:
-        sys_uptime: 1.3.6.1.2.1.1.3.0
-        if_number: 1.3.6.1.2.1.2.1.0
+outputs:
+  latest_json_path: /data/mystmon/latest.json
+  snmp_extend_path: /data/mystmon/snmp_extend.txt
 ```
 
-`poll_interval_seconds: 21600` polls once every 6 hours. Change this if your SNMP monitoring framework needs a different cadence.
+`poll_interval_seconds: 21600` polls once every 6 hours.
+
+## MYST Collection
+
+MystMon gathers read-only data only:
+
+- container running state
+- restart count
+- uptime
+- Docker networks and IPs
+- mapped ports
+- recent log counts for errors, warnings, promises, sessions, settlement/auth/unlock patterns
+- optional TequilAPI `/healthcheck` state
+
+It does not unlock identities, store MYST passwords, change wallet state, or restart MYST containers.
+
+TequilAPI is treated as optional because the official documentation describes it as a powerful local REST API that defaults to port `4050`, exposes Swagger under `/docs`, and includes `/healthcheck`. Keep it bound locally unless you intentionally secure and expose it.
+
+References:
+
+- [MystNodes TequilAPI help](https://help.mystnodes.com/en/articles/4531943-tequilapi)
+- [Mysterium node development docs](https://docs.mysterium.network/for-developers/node-development)
 
 ## Docker Compose Profiles
 
-Run everything configured in `config.yaml`:
+Run the MystMon service:
 
-```powershell
-docker compose up --build
-```
-
-Run with only the API container:
-
-```powershell
-docker compose up --build mystmon
+```bash
+docker compose up -d --build
 ```
 
 Run with an included Prometheus server:
 
-```powershell
-docker compose --profile prometheus up --build
+```bash
+docker compose --profile prometheus up -d --build
 ```
+
+## SNMP Integration
+
+The compact text output is written to:
+
+```text
+/mnt/ssd/codex/mystmon/data/snmp_extend.txt
+```
+
+Example `snmpd` extend entry:
+
+```text
+extend mystmon /bin/cat /mnt/ssd/codex/mystmon/data/snmp_extend.txt
+```
+
+Telegraf can also read the same file with an `inputs.exec` command.
 
 ## Linux Build Host
 
-This repo is configured to use `192.168.1.72` as the Linux build host. The helper scripts copy the current Git commit to that host over SSH and run the Docker build there.
+This repo is configured to use `192.168.1.72` as the Linux build host. The helper scripts copy the current Git commit to `/mnt/ssd/codex/mystmon` over SSH and run the Docker build there.
 
 From Windows PowerShell:
 
@@ -103,7 +146,7 @@ Optional environment overrides:
 ```text
 MYSTMON_BUILD_HOST=192.168.1.72
 MYSTMON_BUILD_USER=
-MYSTMON_REMOTE_DIR=~/mystmon
+MYSTMON_REMOTE_DIR=/mnt/ssd/codex/mystmon
 ```
 
 SSH access to `192.168.1.72` must be configured before running the remote build.
@@ -115,6 +158,7 @@ Core endpoints:
 - `GET /health`
 - `GET /api/v1/config`
 - `GET /api/v1/readings`
+- `GET /api/v1/snapshot`
 - `POST /api/v1/collect`
 - `GET /metrics`
 
@@ -123,7 +167,7 @@ The full API documentation is generated by FastAPI at `/docs` and `/openapi.json
 ## Git Install
 
 ```powershell
-git clone <your-repo-url> mystmon
-cd mystmon
-docker compose up --build
+git clone <your-repo-url> /mnt/ssd/codex/mystmon
+cd /mnt/ssd/codex/mystmon
+docker compose up -d --build
 ```

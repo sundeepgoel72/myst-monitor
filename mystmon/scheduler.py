@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from mystmon.collectors import collect_prometheus, collect_snmp
+from mystmon.collectors import collect_myst_nodes, collect_prometheus, collect_snmp
 from mystmon.config import MystMonConfig
+from mystmon.snapshot import build_snapshot, write_snapshot
 from mystmon.storage import ReadingStore
 
 LOGGER = logging.getLogger(__name__)
@@ -32,7 +33,19 @@ class CollectorScheduler:
 
     async def collect_once(self) -> dict[str, int]:
         timeout = self.config.service.request_timeout_seconds
-        counts = {"prometheus": 0, "snmp": 0}
+        counts = {"myst": 0, "prometheus": 0, "snmp": 0}
+        myst_nodes = []
+
+        if self.config.myst.enabled:
+            try:
+                myst_nodes = await collect_myst_nodes(
+                    self.config.myst,
+                    timeout,
+                    self.config.service.log_window_seconds,
+                )
+                counts["myst"] = len(myst_nodes)
+            except Exception:
+                LOGGER.exception("MYST Docker collection failed")
 
         if self.config.prometheus.enabled:
             for target in self.config.prometheus.targets:
@@ -52,5 +65,10 @@ class CollectorScheduler:
                 except Exception:
                     LOGGER.exception("SNMP collection failed for %s", target.name)
 
+        snapshot = build_snapshot(myst_nodes, counts)
+        write_snapshot(
+            snapshot,
+            self.config.outputs.latest_json_path,
+            self.config.outputs.snmp_extend_path,
+        )
         return counts
-

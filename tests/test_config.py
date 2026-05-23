@@ -24,3 +24,9 @@ def test_snmp_target_requires_oids() -> None:
 
     assert config.snmp.targets[0].host == "192.168.1.72"
 
+
+def test_myst_defaults_use_known_build_host() -> None:
+    config = MystMonConfig()
+
+    assert config.myst.enabled is True
+    assert config.outputs.latest_json_path == "/data/mystmon/latest.json"

@@ -1,0 +1,10 @@
+[Unit]
+Description=MystMon MYST monitoring service
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/mnt/ssd/codex/mystmon
+ExecStart=/usr/bin/docker compose run --rm mystmon python -c "import asyncio; from mystmon.api import create_app; app=create_app(); asyncio.run(app.state.scheduler.collect_once())"
+

@@ -1,0 +1,29 @@
+from mystmon.snapshot import render_snmp_extend
+
+
+def test_render_snmp_extend_uses_compact_node_status() -> None:
+    rendered = render_snmp_extend(
+        {
+            "generated_at": "2026-05-23T00:00:00+00:00",
+            "nodes": [
+                {
+                    "name": "myst.16.x",
+                    "running": True,
+                    "restart_count": 2,
+                    "uptime_seconds": 3600,
+                    "log_counts": {
+                        "error_or_warning": 1,
+                        "promise": 3,
+                        "session": 4,
+                        "identity_warning": 0,
+                    },
+                    "api": {"up": True},
+                }
+            ],
+        }
+    )
+
+    assert "node_count=1" in rendered
+    assert "myst_16_x.running=1" in rendered
+    assert "myst_16_x.promises=3" in rendered
+    assert "myst_16_x.api_up=1" in rendered
