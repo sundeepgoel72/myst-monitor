@@ -75,6 +75,39 @@ Run with an included Prometheus server:
 docker compose --profile prometheus up --build
 ```
 
+## Linux Build Host
+
+This repo is configured to use `192.168.1.72` as the Linux build host. The helper scripts copy the current Git commit to that host over SSH and run the Docker build there.
+
+From Windows PowerShell:
+
+```powershell
+.\ops\build-on-linux.ps1
+```
+
+Build and start the service on the Linux host:
+
+```powershell
+.\ops\build-on-linux.ps1 -Start
+```
+
+From Linux or Git Bash:
+
+```bash
+./ops/build-on-linux.sh
+./ops/build-on-linux.sh --start
+```
+
+Optional environment overrides:
+
+```text
+MYSTMON_BUILD_HOST=192.168.1.72
+MYSTMON_BUILD_USER=
+MYSTMON_REMOTE_DIR=~/mystmon
+```
+
+SSH access to `192.168.1.72` must be configured before running the remote build.
+
 ## API
 
 Core endpoints:
