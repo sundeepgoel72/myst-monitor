@@ -20,7 +20,7 @@ myst:
   docker_socket: unix:///var/run/docker.sock
   container_name_patterns:
     - ^myst(\.|$)
-    - ^myst\d+
+    - ^myst[0-9]
   api_probe_enabled: true
   api_default_port: 4050
   # Leave auth empty unless a node requires Basic Auth for read-only API calls.

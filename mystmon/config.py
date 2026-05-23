@@ -72,7 +72,7 @@ class MystCollectorConfig(BaseModel):
     enabled: bool = True
     local_host: str = "192.168.1.72"
     docker_socket: str = "unix:///var/run/docker.sock"
-    container_name_patterns: list[str] = Field(default_factory=lambda: [r"^myst(\.|$)", r"^myst\d+"])
+    container_name_patterns: list[str] = Field(default_factory=lambda: [r"^myst(\.|$)", r"^myst[0-9]"])
     api_probe_enabled: bool = True
     api_default_port: int = 4050
     api_username: str | None = None
