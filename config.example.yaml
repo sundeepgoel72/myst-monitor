@@ -1,0 +1,23 @@
+service:
+  name: mystmon
+  poll_interval_seconds: 21600
+  request_timeout_seconds: 10
+
+prometheus:
+  enabled: true
+  targets:
+    - name: local-node
+      url: http://node-exporter:9100/metrics
+
+snmp:
+  enabled: true
+  default_community: public
+  targets:
+    - name: existing-snmp-framework
+      host: 192.168.1.72
+      port: 161
+      community: public
+      oids:
+        sys_uptime: 1.3.6.1.2.1.1.3.0
+        if_number: 1.3.6.1.2.1.2.1.0
+

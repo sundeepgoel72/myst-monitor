@@ -1,0 +1,24 @@
+services:
+  mystmon:
+    build: .
+    image: mystmon:0.72
+    container_name: mystmon
+    environment:
+      MYSTMON_CONFIG: ${MYSTMON_CONFIG:-/app/config.yaml}
+      MYSTMON_HOST: ${MYSTMON_HOST:-0.0.0.0}
+      MYSTMON_PORT: ${MYSTMON_PORT:-8072}
+    ports:
+      - "8072:8072"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    profiles:
+      - prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    restart: unless-stopped
