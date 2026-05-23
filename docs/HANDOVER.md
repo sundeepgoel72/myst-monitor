@@ -23,8 +23,12 @@ Useful install commands on `.72`:
 
 ```bash
 cd /mnt/ssd/codex/mystmon
-docker compose up -d --build
+cp .env.example .env
+vi .env
+docker compose pull mystmon
+docker compose up -d mystmon
 bash ops/install-systemd-timer.sh
+./ops/validate-mystmon.sh
 ```
 
 Cron fallback:

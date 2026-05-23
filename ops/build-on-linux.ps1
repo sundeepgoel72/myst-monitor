@@ -34,16 +34,16 @@ if ($LASTEXITCODE -ne 0) {
     throw "Failed to copy archive to $target."
 }
 
-ssh $target "cd $RemoteDir && tar -xf mystmon-build.tar && docker compose build"
+ssh $target "cd $RemoteDir && tar -xf mystmon-build.tar && if [ ! -f .env ]; then cp .env.example .env; fi && docker compose pull mystmon"
 if ($LASTEXITCODE -ne 0) {
-    throw "Remote Docker build failed on $target."
+    throw "Remote Docker image pull failed on $target."
 }
 
 if ($Start) {
-    ssh $target "cd $RemoteDir && docker compose up -d"
+    ssh $target "cd $RemoteDir && docker compose up -d mystmon"
     if ($LASTEXITCODE -ne 0) {
         throw "Remote Docker start failed on $target."
     }
 }
 
-Write-Host "MystMon build completed on $target in $RemoteDir"
+Write-Host "MystMon install completed on $target in $RemoteDir"
