@@ -17,7 +17,11 @@ def test_render_snmp_extend_uses_compact_node_status() -> None:
                         "session": 4,
                         "identity_warning": 0,
                     },
-                    "api": {"up": True},
+                    "api": {
+                        "up": True,
+                        "endpoints": {"healthcheck": {"ok": True}},
+                        "metrics": {"health_uptime_seconds": 30},
+                    },
                 }
             ],
         }
@@ -27,3 +31,5 @@ def test_render_snmp_extend_uses_compact_node_status() -> None:
     assert "myst_16_x.running=1" in rendered
     assert "myst_16_x.promises=3" in rendered
     assert "myst_16_x.api_up=1" in rendered
+    assert "myst_16_x.api.health_uptime_seconds=30" in rendered
+    assert "myst_16_x.api_endpoint.healthcheck=1" in rendered

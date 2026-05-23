@@ -74,6 +74,24 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
         node_uptime = Gauge("mystmon_node_uptime_seconds", "MYST container uptime.", ["node"], registry=registry)
         node_logs = Gauge("mystmon_node_log_events", "Recent MYST log event counts.", ["node", "event"], registry=registry)
         node_api = Gauge("mystmon_node_api_up", "MYST TequilAPI health probe state.", ["node"], registry=registry)
+        node_api_endpoint = Gauge(
+            "mystmon_node_api_endpoint_up",
+            "MYST TequilAPI endpoint probe state.",
+            ["node", "endpoint"],
+            registry=registry,
+        )
+        node_api_metric = Gauge(
+            "mystmon_node_api_metric",
+            "Numeric metric collected from documented MYST TequilAPI endpoints.",
+            ["node", "metric"],
+            registry=registry,
+        )
+        node_api_info = Gauge(
+            "mystmon_node_api_info",
+            "String metadata collected from documented MYST TequilAPI endpoints.",
+            ["node", "key", "value"],
+            registry=registry,
+        )
 
         for reading in store.all():
             if isinstance(reading.value, (int, float)):
@@ -92,6 +110,12 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
                 api = node.get("api") or {}
                 if api:
                     node_api.labels(name).set(1 if api.get("up") else 0)
+                    for endpoint, endpoint_data in api.get("endpoints", {}).items():
+                        node_api_endpoint.labels(name, endpoint).set(1 if endpoint_data.get("ok") else 0)
+                    for metric, value in api.get("metrics", {}).items():
+                        node_api_metric.labels(name, metric).set(value)
+                    for key, value in api.get("labels", {}).items():
+                        node_api_info.labels(name, key, str(value)).set(1)
 
         return Response(
             content=generate_latest(registry),

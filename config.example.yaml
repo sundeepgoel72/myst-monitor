@@ -21,9 +21,34 @@ myst:
     - ^myst(\.|$)
     - ^myst\d+
   api_probe_enabled: true
-  api_probe_paths:
-    - /healthcheck
   api_default_port: 4050
+  api_username:
+  api_password_env:
+  api_endpoints:
+    - name: healthcheck
+      path: /healthcheck
+      metric_prefix: health
+    - name: identities
+      path: /identities
+      metric_prefix: identities
+    - name: services
+      path: /services
+      metric_prefix: services
+    - name: session_stats_aggregated
+      path: /sessions/stats/aggregated
+      metric_prefix: sessions
+    - name: provider_sessions_1d
+      path: /node/provider/sessions-count?range=1d
+      metric_prefix: provider_sessions_1d
+    - name: provider_sessions_7d
+      path: /node/provider/sessions-count?range=7d
+      metric_prefix: provider_sessions_7d
+    - name: location
+      path: /location
+      metric_prefix: location
+    - name: nat_type
+      path: /nat/type
+      metric_prefix: nat
   containers:
     - name: myst.1.x
       host: 192.168.1.72

@@ -45,6 +45,10 @@ def render_snmp_extend(snapshot: dict[str, Any]) -> str:
         api = node.get("api") or {}
         if api:
             lines.append(f"{prefix}.api_up={1 if api.get('up') else 0}")
+            for metric, value in sorted(api.get("metrics", {}).items()):
+                lines.append(f"{prefix}.api.{sanitize_key(metric)}={value}")
+            for endpoint, endpoint_data in sorted(api.get("endpoints", {}).items()):
+                lines.append(f"{prefix}.api_endpoint.{sanitize_key(endpoint)}={1 if endpoint_data.get('ok') else 0}")
     return "\n".join(lines) + "\n"
 
 

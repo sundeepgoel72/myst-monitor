@@ -8,7 +8,7 @@ MystMon is a lightweight monitoring service for the MYST passive income nodes. I
 - REST API with OpenAPI docs at `/docs`
 - Prometheus-compatible `/metrics` endpoint
 - Docker/log collector for MYST containers
-- Optional MYST TequilAPI `/healthcheck` probe when mapped locally
+- Optional MYST TequilAPI metrics when mapped locally
 - SNMP-style status file for `snmpd extend` or Telegraf exec input
 - JSON snapshot at `/data/mystmon/latest.json`
 - YAML configuration with environment overrides
@@ -57,8 +57,10 @@ myst:
   enabled: true
   docker_socket: unix:///var/run/docker.sock
   api_probe_enabled: true
-  api_probe_paths:
-    - /healthcheck
+  api_endpoints:
+    - name: healthcheck
+      path: /healthcheck
+      metric_prefix: health
 
 outputs:
   latest_json_path: /data/mystmon/latest.json
@@ -78,10 +80,30 @@ MystMon gathers read-only data only:
 - mapped ports
 - recent log counts for errors, warnings, promises, sessions, settlement/auth/unlock patterns
 - optional TequilAPI `/healthcheck` state
+- optional TequilAPI metrics from documented read-only surfaces
 
 It does not unlock identities, store MYST passwords, change wallet state, or restart MYST containers.
 
-TequilAPI is treated as optional because the official documentation describes it as a powerful local REST API that defaults to port `4050`, exposes Swagger under `/docs`, and includes `/healthcheck`. Keep it bound locally unless you intentionally secure and expose it.
+TequilAPI is treated as optional because the current MYST docs describe it as a powerful local REST API that defaults to port `4050`, exposes Swagger under `/docs`, and includes read-only surfaces such as `/healthcheck`, `/identities`, `/services/*`, `/sessions/*`, `/node/provider/*`, `/location`, and `/nat/type`. Keep it bound locally unless you intentionally secure and expose it.
+
+MystMon’s default API endpoint list is read-only and tolerant: unavailable, unauthorized, or absent endpoints are recorded as down rather than failing the whole collection pass.
+
+Default API-derived Prometheus metrics are exposed as:
+
+- `mystmon_node_api_up{node=...}`
+- `mystmon_node_api_endpoint_up{node=...,endpoint=...}`
+- `mystmon_node_api_metric{node=...,metric=...}`
+- `mystmon_node_api_info{node=...,key=...,value=...}`
+
+If your nodes require TequilAPI Basic Auth, set this in `config.yaml`:
+
+```yaml
+myst:
+  api_username: myst
+  api_password_env: MYSTMON_TEQUILAPI_PASSWORD
+```
+
+Then set `MYSTMON_TEQUILAPI_PASSWORD` in the environment on `.72`. MystMon does not require or store MYST identity unlock passwords.
 
 References:
 

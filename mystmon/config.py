@@ -55,13 +55,44 @@ class MystContainerConfig(BaseModel):
     tequilapi_port: int | None = None
 
 
+class TequilApiEndpointConfig(BaseModel):
+    name: str
+    path: str
+    metric_prefix: str
+
+
 class MystCollectorConfig(BaseModel):
     enabled: bool = True
     docker_socket: str = "unix:///var/run/docker.sock"
     container_name_patterns: list[str] = Field(default_factory=lambda: [r"^myst(\.|$)", r"^myst\d+"])
     api_probe_enabled: bool = True
-    api_probe_paths: list[str] = Field(default_factory=lambda: ["/healthcheck"])
     api_default_port: int = 4050
+    api_username: str | None = None
+    api_password_env: str | None = None
+    api_endpoints: list[TequilApiEndpointConfig] = Field(
+        default_factory=lambda: [
+            TequilApiEndpointConfig(name="healthcheck", path="/healthcheck", metric_prefix="health"),
+            TequilApiEndpointConfig(name="identities", path="/identities", metric_prefix="identities"),
+            TequilApiEndpointConfig(name="services", path="/services", metric_prefix="services"),
+            TequilApiEndpointConfig(
+                name="session_stats_aggregated",
+                path="/sessions/stats/aggregated",
+                metric_prefix="sessions",
+            ),
+            TequilApiEndpointConfig(
+                name="provider_sessions_1d",
+                path="/node/provider/sessions-count?range=1d",
+                metric_prefix="provider_sessions_1d",
+            ),
+            TequilApiEndpointConfig(
+                name="provider_sessions_7d",
+                path="/node/provider/sessions-count?range=7d",
+                metric_prefix="provider_sessions_7d",
+            ),
+            TequilApiEndpointConfig(name="location", path="/location", metric_prefix="location"),
+            TequilApiEndpointConfig(name="nat_type", path="/nat/type", metric_prefix="nat"),
+        ]
+    )
     containers: list[MystContainerConfig] = Field(default_factory=list)
 
 

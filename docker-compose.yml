@@ -8,6 +8,7 @@ services:
       MYSTMON_CONFIG: ${MYSTMON_CONFIG:-/app/config.yaml}
       MYSTMON_HOST: ${MYSTMON_HOST:-0.0.0.0}
       MYSTMON_PORT: ${MYSTMON_PORT:-8072}
+      MYSTMON_TEQUILAPI_PASSWORD: ${MYSTMON_TEQUILAPI_PASSWORD:-}
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro

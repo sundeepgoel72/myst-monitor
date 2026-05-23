@@ -50,6 +50,17 @@ Returns the latest MYST container snapshot. If no snapshot exists yet, MystMon r
         "promise": 4,
         "session": 2,
         "identity_warning": 0
+      },
+      "api": {
+        "up": true,
+        "metrics": {
+          "health_uptime_seconds": 35010,
+          "identities_count": 1,
+          "services_running_count": 1
+        },
+        "labels": {
+          "health_version": "1.35.4"
+        }
       }
     }
   ]
@@ -76,6 +87,7 @@ Returns the latest numeric readings in Prometheus text format.
 # HELP mystmon_node_running MYST container running state.
 # TYPE mystmon_node_running gauge
 mystmon_node_running{node="myst.16.x"} 1.0
+mystmon_node_api_metric{metric="health_uptime_seconds",node="myst.16.x"} 35010.0
 ```
 
 ## OpenAPI

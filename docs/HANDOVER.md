@@ -6,6 +6,7 @@ MystMon follows the operating constraints from the maintenance handover:
 - It performs read-only Docker inspection and log collection.
 - It does not unlock identities, alter wallet state, or restart MYST containers.
 - It writes `/data/mystmon/latest.json` for debugging and `/data/mystmon/snmp_extend.txt` for existing SNMP-style monitoring.
+- It optionally collects read-only TequilAPI metrics from documented MYST API surfaces when a local API port is mapped.
 - It uses a 6-hour default polling interval.
 
 Known hosts from the handover:
