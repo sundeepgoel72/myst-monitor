@@ -55,6 +55,13 @@ class MystContainerConfig(BaseModel):
     tequilapi_port: int | None = None
 
 
+class MystRemoteHostConfig(BaseModel):
+    host: str
+    user: str = "sundeep"
+    password_env: str | None = None
+    enabled: bool = True
+
+
 class TequilApiEndpointConfig(BaseModel):
     name: str
     path: str
@@ -63,6 +70,7 @@ class TequilApiEndpointConfig(BaseModel):
 
 class MystCollectorConfig(BaseModel):
     enabled: bool = True
+    local_host: str = "192.168.1.72"
     docker_socket: str = "unix:///var/run/docker.sock"
     container_name_patterns: list[str] = Field(default_factory=lambda: [r"^myst(\.|$)", r"^myst\d+"])
     api_probe_enabled: bool = True
@@ -94,6 +102,7 @@ class MystCollectorConfig(BaseModel):
         ]
     )
     containers: list[MystContainerConfig] = Field(default_factory=list)
+    remote_hosts: list[MystRemoteHostConfig] = Field(default_factory=list)
 
 
 class OutputConfig(BaseModel):

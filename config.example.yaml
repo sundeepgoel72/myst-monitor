@@ -16,6 +16,7 @@ snmp:
 
 myst:
   enabled: true
+  local_host: 192.168.1.72
   docker_socket: unix:///var/run/docker.sock
   container_name_patterns:
     - ^myst(\.|$)
@@ -58,6 +59,19 @@ myst:
       host: 192.168.1.72
     - name: myst.18.x
       host: 192.168.1.72
+  remote_hosts:
+    - host: 192.168.1.173
+      user: sundeep
+      password_env: MYSTMON_SSH_PASSWORD
+    - host: 192.168.1.174
+      user: sundeep
+      password_env: MYSTMON_SSH_PASSWORD
+    - host: 192.168.1.175
+      user: sundeep
+      password_env: MYSTMON_SSH_PASSWORD
+    - host: 192.168.1.176
+      user: sundeep
+      password_env: MYSTMON_SSH_PASSWORD
 
 outputs:
   latest_json_path: /data/mystmon/latest.json

@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
+import subprocess
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import docker
 import httpx
 
-from mystmon.config import MystCollectorConfig, TequilApiEndpointConfig
+from mystmon.config import MystCollectorConfig, MystRemoteHostConfig, TequilApiEndpointConfig
 
 ERROR_PATTERN = re.compile(r"error|warn|failed|settle|auth|unlock|authentication needed", re.IGNORECASE)
 WARNING_PATTERN = re.compile(r"authentication needed|failed to sign metrics|unlock", re.IGNORECASE)
@@ -33,7 +35,8 @@ def _collect_myst_nodes_sync(
             for container in client.containers.list(all=True)
             if _is_myst_container(container.name, config.container_name_patterns)
         ]
-        return [_container_snapshot(container, config, log_window_seconds) for container in containers]
+        local_nodes = [_container_snapshot(container, config, log_window_seconds) for container in containers]
+        return local_nodes + _collect_remote_nodes(config, timeout_seconds)
     finally:
         client.close()
 
@@ -54,6 +57,7 @@ def _container_snapshot(container: Any, config: MystCollectorConfig, log_window_
 
     return {
         "name": container.name,
+        "host": config.local_host,
         "id": container.short_id,
         "image": _image_name(attrs),
         "running": state.get("Running", False),
@@ -66,6 +70,108 @@ def _container_snapshot(container: Any, config: MystCollectorConfig, log_window_
         "log_counts": summarize_logs(logs),
         "api": api_probe,
         "warnings": _warnings(logs),
+    }
+
+
+def _collect_remote_nodes(config: MystCollectorConfig, timeout_seconds: int) -> list[dict[str, Any]]:
+    nodes: list[dict[str, Any]] = []
+    for host_config in config.remote_hosts:
+        if not host_config.enabled:
+            continue
+        nodes.extend(_collect_remote_host_nodes(host_config, config, timeout_seconds))
+    return nodes
+
+
+def _collect_remote_host_nodes(
+    host_config: MystRemoteHostConfig,
+    config: MystCollectorConfig,
+    timeout_seconds: int,
+) -> list[dict[str, Any]]:
+    password = os.getenv(host_config.password_env) if host_config.password_env else None
+    if host_config.password_env and not password:
+        return [_remote_error_node(host_config.host, "missing SSH password environment variable")]
+
+    pattern = "|".join(config.container_name_patterns)
+    remote_command = (
+        "docker ps -a --format '{{.Names}}' "
+        f"| grep -Ei '{pattern}' "
+        "| while read -r c; do docker inspect \"$c\" --format '{{json .}}'; done"
+    )
+    command = [
+        "ssh",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-o",
+        f"ConnectTimeout={timeout_seconds}",
+        f"{host_config.user}@{host_config.host}",
+        remote_command,
+    ]
+    env = os.environ.copy()
+    if password:
+        command = ["sshpass", "-e", *command]
+        env["SSHPASS"] = password
+
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            env=env,
+            text=True,
+            timeout=timeout_seconds + 5,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return [_remote_error_node(host_config.host, str(exc))]
+
+    if completed.returncode != 0:
+        return [_remote_error_node(host_config.host, completed.stderr.strip() or "remote SSH inventory failed")]
+
+    nodes: list[dict[str, Any]] = []
+    for line in completed.stdout.splitlines():
+        if not line.strip():
+            continue
+        attrs = json.loads(line)
+        state = attrs.get("State", {})
+        networks = attrs.get("NetworkSettings", {}).get("Networks", {})
+        nodes.append(
+            {
+                "name": attrs.get("Name", "").lstrip("/"),
+                "host": host_config.host,
+                "id": str(attrs.get("Id", ""))[:12],
+                "image": _image_name(attrs),
+                "running": state.get("Running", False),
+                "status": state.get("Status", "unknown"),
+                "restart_count": int(attrs.get("RestartCount", 0)),
+                "started_at": state.get("StartedAt"),
+                "uptime_seconds": _uptime_seconds(state.get("StartedAt")) if state.get("Running") else 0,
+                "networks": _network_summary(networks),
+                "ports": _port_summary(attrs.get("NetworkSettings", {}).get("Ports") or {}),
+                "log_counts": {"error_or_warning": 0, "promise": 0, "session": 0, "identity_warning": 0},
+                "api": {"enabled": False, "reason": "remote API probing disabled"},
+                "warnings": [],
+            }
+        )
+    if not nodes:
+        return [_remote_error_node(host_config.host, "no MYST containers found")]
+    return nodes
+
+
+def _remote_error_node(host: str, reason: str) -> dict[str, Any]:
+    return {
+        "name": f"unreachable-{host}",
+        "host": host,
+        "id": "",
+        "image": "",
+        "running": False,
+        "status": "unreachable",
+        "restart_count": 0,
+        "started_at": None,
+        "uptime_seconds": 0,
+        "networks": [],
+        "ports": [],
+        "log_counts": {"error_or_warning": 1, "promise": 0, "session": 0, "identity_warning": 0},
+        "api": {"enabled": False, "reason": reason},
+        "warnings": [reason],
     }
 
 

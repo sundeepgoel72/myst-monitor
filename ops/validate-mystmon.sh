@@ -17,7 +17,8 @@ import json
 with open("/tmp/mystmon-snapshot.json", "r", encoding="utf-8") as handle:
     snapshot = json.load(handle)
 nodes = snapshot.get("nodes", [])
-print(len(nodes))
+real_nodes = [node for node in nodes if node.get("status") != "unreachable"]
+print(len(real_nodes))
 for node in nodes:
     print(f"{node.get('name')} running={node.get('running')} restarts={node.get('restart_count')} api_up={(node.get('api') or {}).get('up')}")
 PY
