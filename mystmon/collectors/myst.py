@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import subprocess
@@ -13,6 +14,7 @@ import httpx
 
 from mystmon.config import MystCollectorConfig, MystRemoteHostConfig, TequilApiEndpointConfig
 
+LOGGER = logging.getLogger(__name__)
 ERROR_PATTERN = re.compile(r"error|warn|failed|settle|auth|unlock|authentication needed", re.IGNORECASE)
 WARNING_PATTERN = re.compile(r"authentication needed|failed to sign metrics|unlock", re.IGNORECASE)
 PROMISE_PATTERN = re.compile(r"Received hermes promise|promise state updated", re.IGNORECASE)
@@ -202,6 +204,7 @@ def _read_logs(container: Any, since_seconds: int) -> str:
 def _probe_api(container_name: str, ports: dict[str, Any], config: MystCollectorConfig) -> dict[str, Any]:
     port = _configured_api_port(container_name, config) or _mapped_api_port(ports, config.api_default_port)
     if not port:
+        LOGGER.info("MYST API probe skipped container=%s reason=no mapped TequilAPI port found", container_name)
         return {"enabled": False, "reason": "no mapped TequilAPI port found"}
 
     auth = _api_auth(config)
@@ -211,7 +214,7 @@ def _probe_api(container_name: str, ports: dict[str, Any], config: MystCollector
     labels: dict[str, str] = {}
 
     for endpoint in config.api_endpoints:
-        endpoint_result = _fetch_api_endpoint(base_url, endpoint, auth)
+        endpoint_result = _fetch_api_endpoint(base_url, endpoint, auth, container_name)
         endpoints[endpoint.name] = endpoint_result
         if not endpoint_result.get("ok"):
             continue
@@ -280,30 +283,70 @@ def _fetch_api_endpoint(
     base_url: str,
     endpoint: TequilApiEndpointConfig,
     auth: tuple[str, str] | None,
+    container_name: str,
 ) -> dict[str, Any]:
     url = f"{base_url}{endpoint.path}"
+    LOGGER.info("MYST API call container=%s endpoint=%s url=%s", container_name, endpoint.name, url)
     try:
         response = httpx.get(url, timeout=3, auth=auth)
         if response.status_code in {401, 403, 404, 405}:
-            return {
+            result = {
                 "url": url,
                 "status_code": response.status_code,
                 "ok": False,
                 "reason": _api_reason(response.status_code),
             }
+            _log_api_result(container_name, endpoint.name, result)
+            return result
         response.raise_for_status()
-        return {
+        result = {
             "url": url,
             "status_code": response.status_code,
             "ok": True,
             "data": _decode_response(response),
         }
+        _log_api_result(container_name, endpoint.name, result)
+        return result
     except httpx.HTTPError as exc:
-        return {
+        result = {
             "url": url,
             "ok": False,
             "error": str(exc),
         }
+        _log_api_result(container_name, endpoint.name, result)
+        return result
+
+
+def _log_api_result(container_name: str, endpoint_name: str, result: dict[str, Any]) -> None:
+    log_payload = {
+        "ok": result.get("ok"),
+        "status_code": result.get("status_code"),
+        "reason": result.get("reason"),
+        "error": result.get("error"),
+        "data": _redact_api_value(result.get("data")),
+    }
+    LOGGER.info(
+        "MYST API result container=%s endpoint=%s result=%s",
+        container_name,
+        endpoint_name,
+        json.dumps(log_payload, sort_keys=True, default=str),
+    )
+
+
+def _redact_api_value(value: Any, max_chars: int = 2000) -> Any:
+    if isinstance(value, dict):
+        return {key: _redact_api_value(item, max_chars) for key, item in value.items() if _is_log_safe_key(str(key))}
+    if isinstance(value, list):
+        return [_redact_api_value(item, max_chars) for item in value[:20]]
+    if isinstance(value, str):
+        return value if len(value) <= max_chars else f"{value[:max_chars]}...<truncated>"
+    return value
+
+
+def _is_log_safe_key(key: str) -> bool:
+    lowered = key.lower()
+    blocked = ("password", "secret", "token", "private", "key", "mnemonic")
+    return not any(item in lowered for item in blocked)
 
 
 def _api_auth(config: MystCollectorConfig) -> tuple[str, str] | None:

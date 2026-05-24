@@ -7,6 +7,8 @@ services:
     environment:
       MYSTMON_HOST: 0.0.0.0
       MYSTMON_PORT: "8073"
+      MYSTMON_LOG_LEVEL: INFO
+      MYSTMON_POLL_INTERVAL_SECONDS: ${MYSTMON_POLL_INTERVAL_SECONDS:-3600}
       MYSTMON_TEQUILAPI_PASSWORD: ${MYSTMON_TEQUILAPI_PASSWORD:-}
       MYSTMON_SSH_PASSWORD: ${MYSTMON_SSH_PASSWORD:-}
       MYSTNODES_EMAIL: ${MYSTNODES_EMAIL:-}
@@ -15,7 +17,7 @@ services:
       MYSTMON_CONFIG_YAML: |
         service:
           name: mystmon-dev
-          poll_interval_seconds: 21600
+          poll_interval_seconds: ${MYSTMON_POLL_INTERVAL_SECONDS:-3600}
           request_timeout_seconds: 10
           data_dir: /data/mystmon
           log_window_seconds: 21600

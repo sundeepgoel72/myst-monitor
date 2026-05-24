@@ -21,6 +21,10 @@ class CollectorScheduler:
         while not self._stop_event.is_set():
             await self.collect_once()
             try:
+                LOGGER.info(
+                    "MystMon collection sleeping for %s seconds",
+                    self.config.service.poll_interval_seconds,
+                )
                 await asyncio.wait_for(
                     self._stop_event.wait(),
                     timeout=self.config.service.poll_interval_seconds,
@@ -35,6 +39,7 @@ class CollectorScheduler:
         timeout = self.config.service.request_timeout_seconds
         counts = {"myst": 0, "prometheus": 0, "snmp": 0}
         myst_nodes = []
+        LOGGER.info("MystMon collection started")
 
         if self.config.myst.enabled:
             try:
@@ -71,4 +76,5 @@ class CollectorScheduler:
             self.config.outputs.latest_json_path,
             self.config.outputs.snmp_extend_path,
         )
+        LOGGER.info("MystMon collection completed counts=%s", counts)
         return counts
