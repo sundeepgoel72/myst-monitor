@@ -345,7 +345,7 @@ def _redact_api_value(value: Any, max_chars: int = 2000) -> Any:
 
 def _is_log_safe_key(key: str) -> bool:
     lowered = key.lower()
-    blocked = ("password", "secret", "token", "private", "key", "mnemonic")
+    blocked = ("password", "secret", "token", "private", "key", "mnemonic", "email", "wallet", "hash", "address")
     return not any(item in lowered for item in blocked)
 
 

@@ -39,6 +39,9 @@ services:
               path: /api/v2/me
             - name: nodes
               path: /api/v2/node
+              params:
+                page: 1
+                itemsPerPage: 100
             - name: total_earnings
               path: /api/v2/node/total-earnings
             - name: total_transferred

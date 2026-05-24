@@ -52,7 +52,11 @@ async def _login(
 ) -> dict[str, Any]:
     path = "/api/v2/auth/login"
     payload = {"email": email, "password": password, "remember": config.remember}
-    LOGGER.info("MystNodes portal API call method=POST path=%s payload=%s", path, {"email": email, "password": "<redacted>", "remember": config.remember})
+    LOGGER.info(
+        "MystNodes portal API call method=POST path=%s payload=%s",
+        path,
+        {"email": "<redacted>", "password": "<redacted>", "remember": config.remember},
+    )
     try:
         response = await client.post(path, json=payload)
         data = _decode_response(response)

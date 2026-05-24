@@ -121,7 +121,11 @@ class MystNodesPortalConfig(BaseModel):
     endpoints: list[MystNodesPortalEndpointConfig] = Field(
         default_factory=lambda: [
             MystNodesPortalEndpointConfig(name="me", path="/api/v2/me"),
-            MystNodesPortalEndpointConfig(name="nodes", path="/api/v2/node"),
+            MystNodesPortalEndpointConfig(
+                name="nodes",
+                path="/api/v2/node",
+                params={"page": 1, "itemsPerPage": 100},
+            ),
             MystNodesPortalEndpointConfig(name="total_earnings", path="/api/v2/node/total-earnings"),
             MystNodesPortalEndpointConfig(
                 name="total_transferred",
