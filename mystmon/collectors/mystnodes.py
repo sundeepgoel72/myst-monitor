@@ -138,13 +138,15 @@ async def _collect_node_followups(
 
     for node in nodes:
         node_id = str(node.get("id") or "")
-        if not node_id:
+        identity = str(node.get("identity") or "")
+        node_key = identity or node_id
+        if not node_key:
             continue
         node_result: dict[str, Any] = {}
         if config.node_detail_enabled:
-            node_result["detail"] = await _fetch_dynamic(client, "node_detail", f"/api/v2/node/{node_id}", headers)
+            node_result["detail"] = await _fetch_dynamic(client, "node_detail", f"/api/v2/node/{node_key}", headers)
         if config.node_services_enabled:
-            node_result["services"] = await _fetch_dynamic(client, "node_services", f"/api/v2/node/{node_id}/services", headers)
+            node_result["services"] = await _fetch_dynamic(client, "node_services", f"/api/v2/node/{node_key}/services", headers)
         details["nodes"][node_id] = node_result
     return details
 
@@ -199,7 +201,7 @@ def _log_endpoint_result(endpoint: str, result: dict[str, Any]) -> None:
         LOGGER.info("MystNodes portal result endpoint=nodes status=%s ok=%s total=%s returned=%s", status, ok, total, len(nodes))
         return
     if endpoint == "node_totals":
-        LOGGER.info("MystNodes portal result endpoint=node_totals status=%s ok=%s summary=%s", status, ok, _compact_value(data))
+        LOGGER.info("MystNodes portal result endpoint=node_totals status=%s ok=%s summary=%s", status, ok, _compact_node_totals(data))
         return
     if endpoint in {"total_earnings", "total_transferred", "earnings_30d", "node_detail", "node_services"}:
         LOGGER.info("MystNodes portal result endpoint=%s status=%s ok=%s summary=%s", endpoint, status, ok, _compact_value(data))
@@ -255,3 +257,18 @@ def _compact_value(data: Any) -> str:
     if data is None:
         return "none"
     return str(_redact_api_value(data))
+
+
+def _compact_node_totals(data: Any) -> str:
+    if not isinstance(data, dict):
+        return _compact_value(data)
+    parts = []
+    for key, value in data.items():
+        if isinstance(value, dict):
+            scalar_bits = [f"{inner_key}={inner_value}" for inner_key, inner_value in value.items() if not isinstance(inner_value, (dict, list))]
+            parts.append(f"{key}({', '.join(scalar_bits[:6])})")
+        elif isinstance(value, list):
+            parts.append(f"{key}=items:{len(value)}")
+        else:
+            parts.append(f"{key}={value}")
+    return "; ".join(parts[:12])

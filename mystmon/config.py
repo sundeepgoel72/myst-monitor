@@ -119,7 +119,7 @@ class MystNodesPortalConfig(BaseModel):
     password_env: str = "MYSTNODES_PASSWORD"
     remember: bool = True
     node_detail_enabled: bool = True
-    node_services_enabled: bool = True
+    node_services_enabled: bool = False
     node_totals_enabled: bool = True
     node_totals_days: int = Field(default=30, ge=1)
     endpoints: list[MystNodesPortalEndpointConfig] = Field(

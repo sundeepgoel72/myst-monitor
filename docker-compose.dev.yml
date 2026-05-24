@@ -35,7 +35,7 @@ services:
           password_env: MYSTNODES_PASSWORD
           remember: true
           node_detail_enabled: true
-          node_services_enabled: true
+          node_services_enabled: false
           node_totals_enabled: true
           node_totals_days: 30
           endpoints:
