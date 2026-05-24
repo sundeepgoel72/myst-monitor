@@ -4,7 +4,7 @@ Date: 2026-05-24
 
 ## Executive Summary
 
-MystMon `0.72` has been updated for the new dev/prod deployment layout. The Windows workspace is now under `D:\My Projects\codexProject\mystmon`; `.72` prod is designed for `/mnt/ssd/mystmon-prod` on port `8072`, and `.72` dev is designed for `/mnt/ssd/mystmon-dev` on port `8073`.
+MystMon `0.72` has been updated for the new dev/prod deployment layout. The Windows workspace is now under `D:\My Projects\codexProject\mystmon`; `.72` dev is deployed from `/mnt/ssd/mystmon-dev` on port `8073`, and `.72` prod is staged at `/mnt/ssd/mystmon-prod` for Docker Hub image pulls on port `8072`.
 
 The collector is working for the reachable fleet. Current validation finds 7 real MYST containers plus one unreachable placeholder for `192.168.1.174`. The configured target is 8 containers, so validation correctly remains partial until `.174` is back online or its current MYST container can be inventoried.
 
@@ -13,7 +13,7 @@ The collector is working for the reachable fleet. Current validation finds 7 rea
 - Workspace: `D:\My Projects\codexProject\mystmon`
 - Branch: `codex/mystmon-docker-api`
 - Working tree before this report: clean
-- Current local addition: `CURRENT_STATUS.md` is newly added and not yet committed
+- Current deployment commit: `7bb842f`
 - Latest commits:
   - `19ee6da` Use POSIX MYST container pattern
   - `622361a` Add remote MYST host inventory
@@ -45,9 +45,11 @@ The collector is working for the reachable fleet. Current validation finds 7 rea
 - Dev container: `mystmon-dev`
 - Prod image: `docker.io/sundeep/mystmon:0.72`
 - Runtime: Docker Compose with `network_mode: host`
-- Service port: `8072`
-- Current container status: running
-- Current uptime observed: about 23 hours
+- Prod service port: `8072`
+- Dev service port: `8073`
+- Current dev container status: running
+- Current prod status: staged, but Docker Hub pull is blocked until `docker.io/sundeep/mystmon:0.72` exists or Docker Hub auth is configured
+- Previous container still present: `mystmon` from `localhost:5050/mystmon:0.72`
 
 Because the container uses host networking, `docker compose ps` does not show a normal published `PORTS` mapping. The service listens directly on the host through `MYSTMON_PORT=8072`.
 
@@ -56,15 +58,16 @@ Because the container uses host networking, `docker compose ps` does not show a 
 Command used on `.72`:
 
 ```bash
-cd /mnt/ssd/mystmon-prod
-MYSTMON_BASE_URL=http://127.0.0.1:8072 MYSTMON_DATA_DIR=/mnt/ssd/mystmon-prod/data bash ops/validate-mystmon.sh
+cd /mnt/ssd/mystmon-dev
+MYSTMON_BASE_URL=http://127.0.0.1:8073 MYSTMON_DATA_DIR=/mnt/ssd/mystmon-dev/data bash ops/validate-mystmon.sh
 ```
 
 Result:
 
+- Dev health endpoint is reachable.
 - Collection triggered successfully.
 - Snapshot generated successfully.
-- Metrics endpoint reachable through the validation path.
+- Metrics endpoint is reachable through the validation path.
 - Real reachable MYST containers found: 7.
 - Configured expected count: 8.
 - Validation result: partial/failing because `.174` is unreachable.
@@ -87,13 +90,13 @@ Current node inventory:
 - `192.168.1.174` is still unreachable, previously failing with `No route to host`. This blocks full 8-node validation.
 - MYST TequilAPI metrics are implemented, but API metrics depend on TequilAPI being reachable or mapped for the individual MYST containers. Current validation primarily confirms Docker/log/fleet inventory.
 - The `.72` runtime `.env` contains deployment/runtime secrets and is intentionally not committed. Longer-term, SSH key auth would be cleaner than a stored SSH password for remote inventory.
-- Prod Compose now defaults to Docker Hub image `docker.io/sundeep/mystmon:0.72`.
+- Prod Compose now defaults to Docker Hub image `docker.io/sundeep/mystmon:0.72`, but `.72` cannot pull it yet: access denied or repository unavailable.
 - Existing MYST identity signing warnings were observed earlier on local MYST logs. No identity unlock or wallet/account action has been taken.
 
 ## Next Actions
 
 1. Restore network reachability for `192.168.1.174`.
 2. Re-run MystMon validation and confirm all 8 real MYST containers are found.
-3. Decide whether to keep the local `.72` registry or publish to an external registry such as GHCR/Docker Hub.
+3. Publish `docker.io/sundeep/mystmon:0.72` to Docker Hub or run `docker login` on `.72` if the repository is private.
 4. Replace password-based remote inventory with SSH keys if this will run long term.
 5. Wire Prometheus or SNMP polling into the existing monitoring stack using `http://192.168.1.72:8072/metrics` or `/mnt/ssd/mystmon-prod/data/snmp_extend.txt`.
