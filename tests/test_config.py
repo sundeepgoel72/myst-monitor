@@ -40,3 +40,12 @@ def test_inline_config_yaml_takes_precedence(monkeypatch, tmp_path) -> None:
     config = load_config(config_file)
 
     assert config.service.name == "inline-config"
+
+
+def test_mystnodes_portal_config_defaults_to_disabled() -> None:
+    config = MystMonConfig()
+
+    assert config.mystnodes.enabled is False
+    assert config.mystnodes.base_url == "https://my.mystnodes.com"
+    assert config.mystnodes.email_env == "MYSTNODES_EMAIL"
+    assert config.mystnodes.password_env == "MYSTNODES_PASSWORD"

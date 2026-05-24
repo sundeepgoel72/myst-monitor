@@ -28,6 +28,27 @@ services:
           enabled: false
           default_community: public
           targets: []
+        mystnodes:
+          enabled: true
+          base_url: https://my.mystnodes.com
+          email_env: MYSTNODES_EMAIL
+          password_env: MYSTNODES_PASSWORD
+          remember: true
+          endpoints:
+            - name: me
+              path: /api/v2/me
+            - name: nodes
+              path: /api/v2/node
+            - name: total_earnings
+              path: /api/v2/node/total-earnings
+            - name: total_transferred
+              path: /api/v2/node/total-transferred
+              params:
+                days: 30
+            - name: earnings_30d
+              path: /api/v2/node/earnings
+              params:
+                days: 30
         myst:
           enabled: true
           local_host: 192.168.1.72

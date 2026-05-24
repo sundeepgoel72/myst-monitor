@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from mystmon.collectors import collect_myst_nodes, collect_prometheus, collect_snmp
+from mystmon.collectors import collect_myst_nodes, collect_mystnodes_portal, collect_prometheus, collect_snmp
 from mystmon.config import MystMonConfig
 from mystmon.snapshot import build_snapshot, write_snapshot
 from mystmon.storage import ReadingStore
@@ -37,8 +37,9 @@ class CollectorScheduler:
 
     async def collect_once(self) -> dict[str, int]:
         timeout = self.config.service.request_timeout_seconds
-        counts = {"myst": 0, "prometheus": 0, "snmp": 0}
+        counts = {"myst": 0, "mystnodes": 0, "prometheus": 0, "snmp": 0}
         myst_nodes = []
+        mystnodes_portal = None
         LOGGER.info("MystMon collection started")
 
         if self.config.myst.enabled:
@@ -51,6 +52,13 @@ class CollectorScheduler:
                 counts["myst"] = len(myst_nodes)
             except Exception:
                 LOGGER.exception("MYST Docker collection failed")
+
+        if self.config.mystnodes.enabled:
+            try:
+                mystnodes_portal = await collect_mystnodes_portal(self.config.mystnodes, timeout)
+                counts["mystnodes"] = len(mystnodes_portal.get("endpoints", {}))
+            except Exception:
+                LOGGER.exception("MystNodes portal collection failed")
 
         if self.config.prometheus.enabled:
             for target in self.config.prometheus.targets:
@@ -70,7 +78,7 @@ class CollectorScheduler:
                 except Exception:
                     LOGGER.exception("SNMP collection failed for %s", target.name)
 
-        snapshot = build_snapshot(myst_nodes, counts)
+        snapshot = build_snapshot(myst_nodes, counts, mystnodes_portal)
         write_snapshot(
             snapshot,
             self.config.outputs.latest_json_path,

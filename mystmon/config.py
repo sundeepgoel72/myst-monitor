@@ -105,6 +105,38 @@ class MystCollectorConfig(BaseModel):
     remote_hosts: list[MystRemoteHostConfig] = Field(default_factory=list)
 
 
+class MystNodesPortalEndpointConfig(BaseModel):
+    name: str
+    method: str = "GET"
+    path: str
+    params: dict[str, str | int | float | bool] = Field(default_factory=dict)
+
+
+class MystNodesPortalConfig(BaseModel):
+    enabled: bool = False
+    base_url: str = "https://my.mystnodes.com"
+    email_env: str = "MYSTNODES_EMAIL"
+    password_env: str = "MYSTNODES_PASSWORD"
+    remember: bool = True
+    endpoints: list[MystNodesPortalEndpointConfig] = Field(
+        default_factory=lambda: [
+            MystNodesPortalEndpointConfig(name="me", path="/api/v2/me"),
+            MystNodesPortalEndpointConfig(name="nodes", path="/api/v2/node"),
+            MystNodesPortalEndpointConfig(name="total_earnings", path="/api/v2/node/total-earnings"),
+            MystNodesPortalEndpointConfig(
+                name="total_transferred",
+                path="/api/v2/node/total-transferred",
+                params={"days": 30},
+            ),
+            MystNodesPortalEndpointConfig(
+                name="earnings_30d",
+                path="/api/v2/node/earnings",
+                params={"days": 30},
+            ),
+        ]
+    )
+
+
 class OutputConfig(BaseModel):
     latest_json_path: str = "/data/mystmon/latest.json"
     snmp_extend_path: str = "/data/mystmon/snmp_extend.txt"
@@ -115,6 +147,7 @@ class MystMonConfig(BaseModel):
     prometheus: PrometheusConfig = Field(default_factory=PrometheusConfig)
     snmp: SnmpConfig = Field(default_factory=SnmpConfig)
     myst: MystCollectorConfig = Field(default_factory=MystCollectorConfig)
+    mystnodes: MystNodesPortalConfig = Field(default_factory=MystNodesPortalConfig)
     outputs: OutputConfig = Field(default_factory=OutputConfig)
 
 

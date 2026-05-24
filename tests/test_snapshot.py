@@ -1,4 +1,4 @@
-from mystmon.snapshot import render_snmp_extend
+from mystmon.snapshot import build_snapshot, render_snmp_extend
 
 
 def test_render_snmp_extend_uses_compact_node_status() -> None:
@@ -33,3 +33,16 @@ def test_render_snmp_extend_uses_compact_node_status() -> None:
     assert "myst_16_x.api_up=1" in rendered
     assert "myst_16_x.api.health_uptime_seconds=30" in rendered
     assert "myst_16_x.api_endpoint.healthcheck=1" in rendered
+
+
+def test_snapshot_can_include_mystnodes_portal() -> None:
+    snapshot = build_snapshot(
+        [],
+        {"myst": 0, "mystnodes": 1},
+        {"authenticated": True, "endpoints": {"me": {"ok": True}}},
+    )
+    rendered = render_snmp_extend(snapshot)
+
+    assert snapshot["mystnodes"]["authenticated"] is True
+    assert "mystnodes.authenticated=1" in rendered
+    assert "mystnodes.endpoint_count=1" in rendered

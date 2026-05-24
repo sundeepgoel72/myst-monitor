@@ -6,12 +6,19 @@ from pathlib import Path
 from typing import Any
 
 
-def build_snapshot(nodes: list[dict[str, Any]], collection_counts: dict[str, int]) -> dict[str, Any]:
-    return {
+def build_snapshot(
+    nodes: list[dict[str, Any]],
+    collection_counts: dict[str, int],
+    mystnodes_portal: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    snapshot = {
         "generated_at": datetime.now(UTC).isoformat(),
         "collection_counts": collection_counts,
         "nodes": nodes,
     }
+    if mystnodes_portal is not None:
+        snapshot["mystnodes"] = mystnodes_portal
+    return snapshot
 
 
 def write_snapshot(snapshot: dict[str, Any], latest_json_path: str, snmp_extend_path: str) -> None:
@@ -29,6 +36,14 @@ def render_snmp_extend(snapshot: dict[str, Any]) -> str:
         f"generated_at={snapshot.get('generated_at', '')}",
         f"node_count={len(snapshot.get('nodes', []))}",
     ]
+    mystnodes = snapshot.get("mystnodes") or {}
+    if mystnodes:
+        lines.extend(
+            [
+                f"mystnodes.authenticated={1 if mystnodes.get('authenticated') else 0}",
+                f"mystnodes.endpoint_count={len(mystnodes.get('endpoints', {}))}",
+            ]
+        )
     for node in snapshot.get("nodes", []):
         prefix = sanitize_key(node.get("name", "unknown"))
         lines.extend(
