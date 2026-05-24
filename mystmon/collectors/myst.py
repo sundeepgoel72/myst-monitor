@@ -55,8 +55,10 @@ def _container_snapshot(container: Any, config: MystCollectorConfig, log_window_
     logs = _read_logs(container, log_window_seconds)
     api_probe = _probe_api(container.name, ports, config) if config.api_probe_enabled else None
 
+    node_name = _node_display_name(container.name, api_probe)
     return {
-        "name": container.name,
+        "name": node_name,
+        "container_name": container.name,
         "host": config.local_host,
         "id": container.short_id,
         "image": _image_name(attrs),
@@ -133,9 +135,11 @@ def _collect_remote_host_nodes(
         attrs = json.loads(line)
         state = attrs.get("State", {})
         networks = attrs.get("NetworkSettings", {}).get("Networks", {})
+        container_name = attrs.get("Name", "").lstrip("/")
         nodes.append(
             {
-                "name": attrs.get("Name", "").lstrip("/"),
+                "name": container_name,
+                "container_name": container_name,
                 "host": host_config.host,
                 "id": str(attrs.get("Id", ""))[:12],
                 "image": _image_name(attrs),
@@ -159,6 +163,7 @@ def _collect_remote_host_nodes(
 def _remote_error_node(host: str, reason: str) -> dict[str, Any]:
     return {
         "name": f"unreachable-{host}",
+        "container_name": "",
         "host": host,
         "id": "",
         "image": "",
@@ -223,7 +228,52 @@ def _probe_api(container_name: str, ports: dict[str, Any], config: MystCollector
         "endpoints": endpoints,
         "metrics": numeric_metrics,
         "labels": labels,
+        "identity": _api_identity(endpoints, labels),
     }
+
+
+def _node_display_name(container_name: str, api_probe: dict[str, Any] | None) -> str:
+    if api_probe:
+        identity = api_probe.get("identity")
+        if identity:
+            return str(identity)
+        labels = api_probe.get("labels") or {}
+        for key in ("identity_id", "provider_id", "node_id", "status_id"):
+            if labels.get(key):
+                return str(labels[key])
+    return container_name
+
+
+def _api_identity(endpoints: dict[str, Any], labels: dict[str, str]) -> str | None:
+    identity = _identity_from_endpoint(endpoints.get("identities", {}).get("data"))
+    if identity:
+        return identity
+    for key in ("identity_id", "provider_id", "node_id", "status_id"):
+        if labels.get(key):
+            return labels[key]
+    return None
+
+
+def _identity_from_endpoint(data: Any) -> str | None:
+    identities = _list_from_payload(data, "identities")
+    if not identities:
+        if isinstance(data, dict):
+            return _first_string_value(data, ("id", "identity", "provider_id", "providerId", "node_id", "nodeId"))
+        return None
+    first = identities[0]
+    if isinstance(first, dict):
+        return _first_string_value(first, ("id", "identity", "provider_id", "providerId", "node_id", "nodeId", "address"))
+    if isinstance(first, str):
+        return first
+    return None
+
+
+def _first_string_value(data: dict[str, Any], keys: tuple[str, ...]) -> str | None:
+    for key in keys:
+        value = data.get(key)
+        if value is not None and not isinstance(value, (dict, list)):
+            return str(value)
+    return None
 
 
 def _fetch_api_endpoint(

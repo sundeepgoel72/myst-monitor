@@ -119,6 +119,11 @@ class MystMonConfig(BaseModel):
 
 
 def load_config(path: str | os.PathLike[str] | None = None) -> MystMonConfig:
+    inline_config = os.getenv("MYSTMON_CONFIG_YAML")
+    if inline_config:
+        raw_inline: dict[str, Any] = yaml.safe_load(inline_config) or {}
+        return MystMonConfig.model_validate(raw_inline)
+
     config_path = Path(path or os.getenv("MYSTMON_CONFIG", "config.yaml"))
     if not config_path.exists():
         return MystMonConfig()

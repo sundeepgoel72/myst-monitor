@@ -1,21 +1,86 @@
 services:
-  mystmon:
-    image: ${MYSTMON_IMAGE:-ghcr.io/your-org/mystmon:0.72}
-    container_name: mystmon
+  mystmon-prod:
+    image: ${MYSTMON_IMAGE:-docker.io/sundeep/mystmon:0.72}
+    container_name: mystmon-prod
     network_mode: host
     environment:
-      MYSTMON_CONFIG: ${MYSTMON_CONFIG:-/app/config.yaml}
-      MYSTMON_HOST: ${MYSTMON_HOST:-0.0.0.0}
-      MYSTMON_PORT: ${MYSTMON_PORT:-8072}
+      MYSTMON_HOST: 0.0.0.0
+      MYSTMON_PORT: "8072"
       MYSTMON_TEQUILAPI_PASSWORD: ${MYSTMON_TEQUILAPI_PASSWORD:-}
       MYSTMON_SSH_PASSWORD: ${MYSTMON_SSH_PASSWORD:-}
       MYSTNODES_EMAIL: ${MYSTNODES_EMAIL:-}
       MYSTNODES_PASSWORD: ${MYSTNODES_PASSWORD:-}
-      MYSTMON_EXPECTED_NODE_COUNT: ${MYSTMON_EXPECTED_NODE_COUNT:-8}
+      MYSTMON_EXPECTED_NODE_COUNT: "8"
+      MYSTMON_CONFIG_YAML: |
+        service:
+          name: mystmon-prod
+          poll_interval_seconds: 21600
+          request_timeout_seconds: 10
+          data_dir: /data/mystmon
+          log_window_seconds: 21600
+        prometheus:
+          enabled: true
+          targets: []
+        snmp:
+          enabled: false
+          default_community: public
+          targets: []
+        myst:
+          enabled: true
+          local_host: 192.168.1.72
+          docker_socket: unix:///var/run/docker.sock
+          container_name_patterns:
+            - ^myst(\.|$)
+            - ^myst[0-9]
+          api_probe_enabled: true
+          api_default_port: 4050
+          api_username:
+          api_password_env:
+          api_endpoints:
+            - name: healthcheck
+              path: /healthcheck
+              metric_prefix: health
+            - name: identities
+              path: /identities
+              metric_prefix: identities
+            - name: services
+              path: /services
+              metric_prefix: services
+            - name: session_stats_aggregated
+              path: /sessions/stats/aggregated
+              metric_prefix: sessions
+            - name: provider_sessions_1d
+              path: /node/provider/sessions-count?range=1d
+              metric_prefix: provider_sessions_1d
+            - name: provider_sessions_7d
+              path: /node/provider/sessions-count?range=7d
+              metric_prefix: provider_sessions_7d
+            - name: location
+              path: /location
+              metric_prefix: location
+            - name: nat_type
+              path: /nat/type
+              metric_prefix: nat
+          containers: []
+          remote_hosts:
+            - host: 192.168.1.173
+              user: sundeep
+              password_env: MYSTMON_SSH_PASSWORD
+            - host: 192.168.1.174
+              user: sundeep
+              password_env: MYSTMON_SSH_PASSWORD
+            - host: 192.168.1.175
+              user: sundeep
+              password_env: MYSTMON_SSH_PASSWORD
+            - host: 192.168.1.176
+              user: sundeep
+              password_env: MYSTMON_SSH_PASSWORD
+        outputs:
+          latest_json_path: /data/mystmon/latest.json
+          snmp_extend_path: /data/mystmon/snmp_extend.txt
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./data:/data/mystmon
+      - /mnt/ssd/mystmon-prod/data:/data/mystmon
     restart: unless-stopped
 
   prometheus:

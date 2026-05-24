@@ -2,7 +2,7 @@
 
 MystMon follows the operating constraints from the maintenance handover:
 
-- It runs on `192.168.1.72` from `/mnt/ssd/codex/mystmon`.
+- It runs on `192.168.1.72` from `/mnt/ssd/mystmon-prod` for prod and `/mnt/ssd/mystmon-dev` for dev.
 - It performs read-only Docker inspection and log collection.
 - It does not unlock identities, alter wallet state, or restart MYST containers.
 - It writes `/data/mystmon/latest.json` for debugging and `/data/mystmon/snmp_extend.txt` for existing SNMP-style monitoring.
@@ -22,13 +22,13 @@ Known hosts from the handover:
 Useful install commands on `.72`:
 
 ```bash
-cd /mnt/ssd/codex/mystmon
+cd /mnt/ssd/mystmon-prod
 cp .env.example .env
 vi .env
-docker compose pull mystmon
-docker compose up -d mystmon
+docker compose pull mystmon-prod
+docker compose up -d mystmon-prod
 bash ops/install-systemd-timer.sh
-./ops/validate-mystmon.sh
+MYSTMON_BASE_URL=http://127.0.0.1:8072 MYSTMON_DATA_DIR=/mnt/ssd/mystmon-prod/data ./ops/validate-mystmon.sh
 ```
 
 Cron fallback:

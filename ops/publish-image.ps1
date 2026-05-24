@@ -4,7 +4,7 @@ param(
 )
 
 if ([string]::IsNullOrWhiteSpace($Image)) {
-    throw "Set MYSTMON_IMAGE, for example ghcr.io/<owner>/mystmon:0.72"
+    throw "Set MYSTMON_IMAGE, for example docker.io/sundeep/mystmon:0.72"
 }
 
 docker build -t $Image .

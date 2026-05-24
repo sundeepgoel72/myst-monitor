@@ -1,76 +1,65 @@
 # MystMon 0.72
 
-MystMon is a lightweight monitoring service for the MYST passive income nodes. It is designed to run on the HP400 management host at `192.168.1.72` from `/mnt/ssd/codex/mystmon`, poll local Docker containers every 6 hours, and expose status through Prometheus, JSON, and SNMP-friendly text output.
+MystMon is a lightweight monitoring service for MYST passive income nodes. It runs on `192.168.1.72`, polls the fleet every 6 hours, and exposes Prometheus metrics, a JSON snapshot, and SNMP-friendly text output.
+
+The Windows umbrella workspace is:
+
+```text
+D:\My Projects\codexProject
+```
+
+This project lives at:
+
+```text
+D:\My Projects\codexProject\mystmon
+```
 
 ## Features
 
-- Docker-installable service with `docker compose`
-- REST API with OpenAPI docs at `/docs`
-- Prometheus-compatible `/metrics` endpoint
-- Docker/log collector for MYST containers
-- Optional MYST TequilAPI metrics when mapped locally
-- SNMP-style status file for `snmpd extend` or Telegraf exec input
-- JSON snapshot at `/data/mystmon/latest.json`
-- YAML configuration with environment overrides
+- Docker Compose install with separate dev and prod services.
+- Prod pulls `docker.io/sundeep/mystmon:0.72`.
+- Dev builds locally on `192.168.1.72`.
+- REST API with OpenAPI docs at `/docs`.
+- Prometheus-compatible `/metrics` endpoint.
+- Docker/log collector for MYST containers.
+- Optional read-only MYST TequilAPI metrics when mapped locally.
+- API-derived node naming when TequilAPI identity data is available.
+- SNMP-style status file for `snmpd extend` or Telegraf exec input.
+- JSON snapshot at `/data/mystmon/latest.json`.
 
-## Quick Start
+## Dev And Prod Layout
 
-On `192.168.1.72`:
+| Environment | Linux directory | Container | URL |
+| --- | --- | --- | --- |
+| Prod | `/mnt/ssd/mystmon-prod` | `mystmon-prod` | `http://192.168.1.72:8072` |
+| Dev | `/mnt/ssd/mystmon-dev` | `mystmon-dev` | `http://192.168.1.72:8073` |
 
-```bash
-mkdir -p /mnt/ssd/codex
-cd /mnt/ssd/codex
-git clone <your-repo-url> mystmon
-cd mystmon
-cp .env.example .env
-vi .env
-docker compose pull mystmon
-docker compose up -d mystmon
-```
-
-Then open:
+Prod uses:
 
 ```text
-http://192.168.1.72:8072/docs
-http://192.168.1.72:8072/metrics
+docker.io/sundeep/mystmon:0.72
 ```
 
-From this Windows workspace, after SSH is configured:
-
-```powershell
-.\ops\build-on-linux.ps1 -Start
-```
+Dev uses a local build through `docker-compose.dev.yml`.
 
 ## Configuration
 
-MystMon reads `config.yaml` by default. The committed default targets the known MYST containers on `192.168.1.72`:
+Most non-secret config is stored directly in `docker-compose.yml` as `MYSTMON_CONFIG_YAML`. Secrets stay in an untracked `.env` file:
 
-- `myst.1.x`
-- `myst.12.x`
-- `myst.17.x`
-- `myst.18.x`
-
-```yaml
-service:
-  name: mystmon
-  poll_interval_seconds: 21600
-  log_window_seconds: 21600
-
-myst:
-  enabled: true
-  docker_socket: unix:///var/run/docker.sock
-  api_probe_enabled: true
-  api_endpoints:
-    - name: healthcheck
-      path: /healthcheck
-      metric_prefix: health
-
-outputs:
-  latest_json_path: /data/mystmon/latest.json
-  snmp_extend_path: /data/mystmon/snmp_extend.txt
+```text
+MYSTMON_SSH_PASSWORD=
+MYSTMON_TEQUILAPI_PASSWORD=
+MYSTNODES_EMAIL=
+MYSTNODES_PASSWORD=
 ```
 
-`poll_interval_seconds: 21600` polls once every 6 hours.
+MystMon config precedence:
+
+1. `MYSTMON_CONFIG_YAML`
+2. `MYSTMON_CONFIG` file path
+3. built-in defaults
+
+The committed Compose config discovers MYST containers by Docker name pattern instead of requiring static local node names. Static container entries are only needed for overrides such as explicit TequilAPI ports.
 
 ## MYST Collection
 
@@ -83,77 +72,39 @@ MystMon gathers read-only data only:
 - mapped ports
 - recent log counts for errors, warnings, promises, sessions, settlement/auth/unlock patterns
 - optional TequilAPI `/healthcheck` state
-- optional TequilAPI metrics from documented read-only surfaces
+- optional TequilAPI metrics from documented read-only endpoints
 
 It does not unlock identities, store MYST passwords, change wallet state, or restart MYST containers.
 
-TequilAPI is treated as optional because the current MYST docs describe it as a powerful local REST API that defaults to port `4050`, exposes Swagger under `/docs`, and includes read-only surfaces such as `/healthcheck`, `/identities`, `/services/*`, `/sessions/*`, `/node/provider/*`, `/location`, and `/nat/type`. Keep it bound locally unless you intentionally secure and expose it.
+Node display name fallback order:
 
-MystMon’s default API endpoint list is read-only and tolerant: unavailable, unauthorized, or absent endpoints are recorded as down rather than failing the whole collection pass.
+1. TequilAPI identity/provider identifier
+2. TequilAPI node/status metadata
+3. Docker container name
+4. `unreachable-<host>` placeholder
 
-Default API-derived Prometheus metrics are exposed as:
-
-- `mystmon_node_api_up{node=...}`
-- `mystmon_node_api_endpoint_up{node=...,endpoint=...}`
-- `mystmon_node_api_metric{node=...,metric=...}`
-- `mystmon_node_api_info{node=...,key=...,value=...}`
-
-If your nodes require TequilAPI Basic Auth, set this in `config.yaml`:
-
-```yaml
-myst:
-  api_username: myst
-  api_password_env: MYSTMON_TEQUILAPI_PASSWORD
-```
-
-Then set `MYSTMON_TEQUILAPI_PASSWORD` in the environment on `.72`. MystMon does not require or store MYST identity unlock passwords.
-
-References:
-
-- [MystNodes TequilAPI help](https://help.mystnodes.com/en/articles/4531943-tequilapi)
-- [Mysterium node development docs](https://docs.mysterium.network/for-developers/node-development)
-
-## Docker Compose Profiles
-
-Run the MystMon service:
+## Install Prod On `.72`
 
 ```bash
-docker compose up -d --build
+mkdir -p /mnt/ssd/mystmon-prod
+cd /mnt/ssd/mystmon-prod
+cp .env.example .env
+vi .env
+docker compose pull mystmon-prod
+docker compose up -d mystmon-prod
+MYSTMON_BASE_URL=http://127.0.0.1:8072 MYSTMON_DATA_DIR=/mnt/ssd/mystmon-prod/data ./ops/validate-mystmon.sh
 ```
 
-Run with an included Prometheus server:
-
-```bash
-docker compose --profile prometheus up -d --build
-```
-
-## SNMP Integration
-
-The compact text output is written to:
+Prod endpoints:
 
 ```text
-/mnt/ssd/codex/mystmon/data/snmp_extend.txt
+http://192.168.1.72:8072/docs
+http://192.168.1.72:8072/metrics
 ```
 
-Example `snmpd` extend entry:
-
-```text
-extend mystmon /bin/cat /mnt/ssd/codex/mystmon/data/snmp_extend.txt
-```
-
-Telegraf can also read the same file with an `inputs.exec` command.
-
-## Linux Build Host
-
-This repo is configured to use `192.168.1.72` as the Linux build host. The helper scripts copy the current Git commit to `/mnt/ssd/codex/mystmon` over SSH and run the Docker build there.
+## Build And Run Dev On `.72`
 
 From Windows PowerShell:
-
-```powershell
-.\ops\build-on-linux.ps1
-```
-
-Build and start the service on the Linux host:
 
 ```powershell
 .\ops\build-on-linux.ps1 -Start
@@ -162,78 +113,45 @@ Build and start the service on the Linux host:
 From Linux or Git Bash:
 
 ```bash
-./ops/build-on-linux.sh
 ./ops/build-on-linux.sh --start
 ```
 
-Optional environment overrides:
+Dev endpoints:
 
 ```text
-MYSTMON_IMAGE=ghcr.io/<owner>/mystmon:0.72
-MYSTMON_EXPECTED_NODE_COUNT=8
-MYSTMON_BUILD_HOST=192.168.1.72
-MYSTMON_BUILD_USER=
-MYSTMON_REMOTE_DIR=/mnt/ssd/codex/mystmon
-MYSTMON_TEQUILAPI_PASSWORD=
-MYSTNODES_EMAIL=
-MYSTNODES_PASSWORD=
+http://192.168.1.72:8073/docs
+http://192.168.1.72:8073/metrics
 ```
-
-SSH access to `192.168.1.72` must be configured before running the remote build.
 
 ## Publishing
 
-The install compose file expects a published image repository:
-
-```text
-MYSTMON_IMAGE=ghcr.io/<owner>/mystmon:0.72
-```
-
-Publish to an external registry manually after `docker login`:
+After Docker Hub login:
 
 ```bash
-export MYSTMON_IMAGE=ghcr.io/<owner>/mystmon:0.72
+export MYSTMON_IMAGE=docker.io/sundeep/mystmon:0.72
 ./ops/publish-image.sh
 ```
 
 Or from PowerShell:
 
 ```powershell
-$env:MYSTMON_IMAGE = "ghcr.io/<owner>/mystmon:0.72"
+$env:MYSTMON_IMAGE = "docker.io/sundeep/mystmon:0.72"
 .\ops\publish-image.ps1
 ```
 
-For local development builds:
+## SNMP Integration
 
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build mystmon
+Prod SNMP text output:
+
+```text
+/mnt/ssd/mystmon-prod/data/snmp_extend.txt
 ```
 
-The included GitHub Actions workflow publishes to GHCR on tags such as `v0.72.0`.
+Example `snmpd` extend entry:
 
-For a private `.72` registry fallback:
-
-```bash
-docker run -d --restart unless-stopped -p 127.0.0.1:5000:5000 --name registry registry:2
-export MYSTMON_IMAGE=localhost:5000/mystmon:0.72
-./ops/publish-image.sh
-docker compose pull mystmon
-docker compose up -d mystmon
+```text
+extend mystmon /bin/cat /mnt/ssd/mystmon-prod/data/snmp_extend.txt
 ```
-
-## Validation On `.72`
-
-After install on `192.168.1.72`:
-
-```bash
-cd /mnt/ssd/codex/mystmon
-set -a
-. ./.env
-set +a
-./ops/validate-mystmon.sh
-```
-
-The validator triggers a collection, checks `/api/v1/snapshot`, expects `8` MYST containers by default, checks `/metrics`, and verifies both JSON and SNMP text outputs exist.
 
 ## API
 
@@ -247,14 +165,3 @@ Core endpoints:
 - `GET /metrics`
 
 The full API documentation is generated by FastAPI at `/docs` and `/openapi.json`.
-
-## Git Install
-
-```powershell
-git clone <your-repo-url> /mnt/ssd/codex/mystmon
-cd /mnt/ssd/codex/mystmon
-cp .env.example .env
-vi .env
-docker compose pull mystmon
-docker compose up -d mystmon
-```

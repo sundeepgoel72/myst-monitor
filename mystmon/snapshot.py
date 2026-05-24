@@ -33,6 +33,7 @@ def render_snmp_extend(snapshot: dict[str, Any]) -> str:
         prefix = sanitize_key(node.get("name", "unknown"))
         lines.extend(
             [
+                f"{prefix}.container_name={node.get('container_name', '')}",
                 f"{prefix}.running={1 if node.get('running') else 0}",
                 f"{prefix}.restart_count={node.get('restart_count', 0)}",
                 f"{prefix}.uptime_seconds={node.get('uptime_seconds', 0)}",

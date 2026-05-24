@@ -1,4 +1,4 @@
-from mystmon.config import MystMonConfig
+from mystmon.config import MystMonConfig, load_config
 
 
 def test_default_poll_interval_is_six_hours() -> None:
@@ -30,3 +30,13 @@ def test_myst_defaults_use_known_build_host() -> None:
 
     assert config.myst.enabled is True
     assert config.outputs.latest_json_path == "/data/mystmon/latest.json"
+
+
+def test_inline_config_yaml_takes_precedence(monkeypatch, tmp_path) -> None:
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("service:\n  name: file-config\n", encoding="utf-8")
+    monkeypatch.setenv("MYSTMON_CONFIG_YAML", "service:\n  name: inline-config\n")
+
+    config = load_config(config_file)
+
+    assert config.service.name == "inline-config"

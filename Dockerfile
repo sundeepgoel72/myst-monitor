@@ -18,6 +18,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY mystmon ./mystmon
 COPY config.example.yaml ./config.yaml
 
-EXPOSE 8072
+EXPOSE 8072 8073
 
 CMD ["python", "-m", "mystmon.main"]

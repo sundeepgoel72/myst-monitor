@@ -1,4 +1,4 @@
-from mystmon.collectors.myst import extract_api_metrics, summarize_logs
+from mystmon.collectors.myst import _node_display_name, extract_api_metrics, summarize_logs
 
 
 def test_summarize_logs_tracks_myst_health_patterns() -> None:
@@ -53,3 +53,19 @@ def test_extract_api_metrics_from_documented_lists() -> None:
     assert identities["metrics"]["identities_count"] == 1
     assert services["metrics"]["services_count"] == 2
     assert services["metrics"]["services_running_count"] == 1
+
+
+def test_node_display_name_prefers_api_identity() -> None:
+    name = _node_display_name(
+        "myst.1.x",
+        {
+            "identity": "0xabc123",
+            "labels": {"node_id": "node-from-label"},
+        },
+    )
+
+    assert name == "0xabc123"
+
+
+def test_node_display_name_falls_back_to_container_name() -> None:
+    assert _node_display_name("myst.1.x", {"labels": {}}) == "myst.1.x"

@@ -3,7 +3,7 @@ set -euo pipefail
 
 image="${MYSTMON_IMAGE:-}"
 if [[ -z "$image" ]]; then
-  echo "Set MYSTMON_IMAGE, for example ghcr.io/<owner>/mystmon:0.72" >&2
+  echo "Set MYSTMON_IMAGE, for example docker.io/sundeep/mystmon:0.72" >&2
   exit 1
 fi
 
