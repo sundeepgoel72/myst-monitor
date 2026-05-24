@@ -158,7 +158,12 @@ async def _fetch_dynamic(
     headers: dict[str, str],
     params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    LOGGER.info("MystNodes portal API call method=GET endpoint=%s path=%s params=%s", name, path, params or {})
+    LOGGER.info(
+        "MystNodes portal API call method=GET endpoint=%s path=%s params=%s",
+        name,
+        path,
+        _compact_params(name, params or {}),
+    )
     try:
         response = await client.get(path, params=params or {}, headers=headers)
         data = _decode_response(response)
@@ -245,6 +250,14 @@ def _sum_earnings(earnings: Any) -> float:
 
 def _compact_value(data: Any) -> str:
     if isinstance(data, dict):
+        if "nodeStatus" in data or "monitoringStatus" in data:
+            status = data.get("nodeStatus") or {}
+            return (
+                f"id={data.get('id')} name={data.get('name')} online={status.get('online')} "
+                f"quality={status.get('quality')} monitoring={data.get('monitoringStatus')} "
+                f"version={data.get('version')} local_ip={data.get('localIp')} "
+                f"uptime_min_24h={data.get('uptimeMinLast24H')}"
+            )
         if "earningsTotal" in data:
             return f"earnings_total={data.get('earningsTotal')}"
         if "transferredTotal" in data:
@@ -257,6 +270,14 @@ def _compact_value(data: Any) -> str:
     if data is None:
         return "none"
     return str(_redact_api_value(data))
+
+
+def _compact_params(endpoint: str, params: dict[str, Any]) -> dict[str, Any]:
+    if endpoint == "node_totals" and "identities" in params:
+        identities = str(params.get("identities") or "")
+        identity_count = len([item for item in identities.split(",") if item])
+        return {"days": params.get("days"), "identity_count": identity_count}
+    return params
 
 
 def _compact_node_totals(data: Any) -> str:
