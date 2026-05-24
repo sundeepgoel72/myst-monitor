@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from urllib.parse import urlencode
@@ -41,6 +42,7 @@ async def collect_mystnodes_portal(config: MystNodesPortalConfig, timeout_second
 
         headers = {"Authorization": f"Bearer {token}", "called-from": "mystmon-dev"}
         for endpoint in config.endpoints:
+            await _throttle(config)
             portal["endpoints"][endpoint.name] = await _fetch_endpoint(client, endpoint, headers)
         nodes = _nodes_from_result(portal["endpoints"].get("nodes", {}))
         if nodes:
@@ -134,6 +136,7 @@ async def _collect_node_followups(
     identities = [str(node.get("identity")) for node in nodes if node.get("identity")]
     if config.node_totals_enabled and identities:
         params = {"days": config.node_totals_days, "identities": ",".join(identities)}
+        await _throttle(config)
         details["totals"] = await _fetch_dynamic(client, "node_totals", "/api/v1/metrics/node-totals", headers, params)
 
     for node in nodes:
@@ -144,11 +147,18 @@ async def _collect_node_followups(
             continue
         node_result: dict[str, Any] = {}
         if config.node_detail_enabled:
+            await _throttle(config)
             node_result["detail"] = await _fetch_dynamic(client, "node_detail", f"/api/v2/node/{node_key}", headers)
         if config.node_services_enabled:
+            await _throttle(config)
             node_result["services"] = await _fetch_dynamic(client, "node_services", f"/api/v2/node/{node_key}/services", headers)
         details["nodes"][node_id] = node_result
     return details
+
+
+async def _throttle(config: MystNodesPortalConfig) -> None:
+    if config.request_delay_seconds > 0:
+        await asyncio.sleep(config.request_delay_seconds)
 
 
 async def _fetch_dynamic(

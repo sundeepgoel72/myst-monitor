@@ -118,6 +118,7 @@ class MystNodesPortalConfig(BaseModel):
     email_env: str = "MYSTNODES_EMAIL"
     password_env: str = "MYSTNODES_PASSWORD"
     remember: bool = True
+    request_delay_seconds: float = Field(default=1.0, ge=0)
     node_detail_enabled: bool = True
     node_services_enabled: bool = False
     node_totals_enabled: bool = True
