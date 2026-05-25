@@ -92,6 +92,53 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
             ["node", "key", "value"],
             registry=registry,
         )
+        portal_authenticated = Gauge(
+            "mystmon_portal_authenticated",
+            "MystNodes portal authentication state.",
+            registry=registry,
+        )
+        portal_endpoint = Gauge(
+            "mystmon_portal_endpoint_up",
+            "MystNodes portal endpoint request state.",
+            ["endpoint"],
+            registry=registry,
+        )
+        portal_summary = Gauge(
+            "mystmon_portal_summary",
+            "MystNodes portal account summary values.",
+            ["metric"],
+            registry=registry,
+        )
+        portal_node_online = Gauge(
+            "mystmon_portal_node_online",
+            "MystNodes portal node online state.",
+            ["node_id", "name", "identity", "local_ip"],
+            registry=registry,
+        )
+        portal_node_quality = Gauge(
+            "mystmon_portal_node_quality",
+            "MystNodes portal node quality score.",
+            ["node_id", "name", "identity", "local_ip"],
+            registry=registry,
+        )
+        portal_node_earnings = Gauge(
+            "mystmon_portal_node_earnings_total",
+            "MystNodes portal per-node total earnings from node list.",
+            ["node_id", "name", "identity", "local_ip"],
+            registry=registry,
+        )
+        portal_node_uptime_24h = Gauge(
+            "mystmon_portal_node_uptime_minutes_24h",
+            "MystNodes portal node uptime minutes in the last 24 hours.",
+            ["node_id", "name", "identity", "local_ip"],
+            registry=registry,
+        )
+        portal_node_local_match = Gauge(
+            "mystmon_portal_node_local_match",
+            "Whether a MystNodes portal node was matched to a local Docker container by local IP.",
+            ["node_id", "name", "local_ip", "container", "host"],
+            registry=registry,
+        )
 
         for reading in store.all():
             if isinstance(reading.value, (int, float)):
@@ -116,6 +163,20 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
                         node_api_metric.labels(name, metric).set(value)
                     for key, value in api.get("labels", {}).items():
                         node_api_info.labels(name, key, str(value)).set(1)
+            mystnodes = snapshot_data.get("mystnodes") or {}
+            if mystnodes:
+                portal_authenticated.set(1 if mystnodes.get("authenticated") else 0)
+                for endpoint, endpoint_data in mystnodes.get("endpoints", {}).items():
+                    portal_endpoint.labels(endpoint).set(1 if endpoint_data.get("ok") else 0)
+                _set_portal_metrics(
+                    mystnodes,
+                    portal_summary,
+                    portal_node_online,
+                    portal_node_quality,
+                    portal_node_earnings,
+                    portal_node_uptime_24h,
+                    portal_node_local_match,
+                )
 
         return Response(
             content=generate_latest(registry),
@@ -123,3 +184,82 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
         )
 
     return app
+
+
+def _set_portal_metrics(
+    mystnodes: dict,
+    portal_summary: Gauge,
+    portal_node_online: Gauge,
+    portal_node_quality: Gauge,
+    portal_node_earnings: Gauge,
+    portal_node_uptime_24h: Gauge,
+    portal_node_local_match: Gauge,
+) -> None:
+    endpoints = mystnodes.get("endpoints", {})
+    me_data = (endpoints.get("me") or {}).get("data") or {}
+    nodes_info = me_data.get("nodesInfo") or {}
+    _set_numeric(portal_summary, "nodes_total", nodes_info.get("totalCount"))
+    _set_numeric(portal_summary, "nodes_online", nodes_info.get("onlineCount"))
+
+    total_earnings = ((endpoints.get("total_earnings") or {}).get("data") or {}).get("earningsTotal")
+    total_transferred = ((endpoints.get("total_transferred") or {}).get("data") or {}).get("transferredTotal")
+    _set_numeric(portal_summary, "earnings_total", total_earnings)
+    _set_numeric(portal_summary, "transferred_total", total_transferred)
+
+    node_details = (mystnodes.get("node_details") or {}).get("nodes", {})
+    for node in _portal_nodes(mystnodes):
+        node_id = str(node.get("id") or "")
+        name = str(node.get("name") or "")
+        identity = str(node.get("identity") or "")
+        local_ip = str(node.get("localIp") or "")
+        labels = (node_id, name, identity, local_ip)
+        status = node.get("nodeStatus") or {}
+        portal_node_online.labels(*labels).set(1 if status.get("online") else 0)
+        _set_numeric_with_labels(portal_node_quality, labels, status.get("quality"))
+        portal_node_earnings.labels(*labels).set(_sum_node_earnings(node.get("earnings")))
+        detail = ((node_details.get(node_id) or {}).get("detail") or {}).get("data") or {}
+        _set_numeric_with_labels(portal_node_uptime_24h, labels, detail.get("uptimeMinLast24H"))
+
+    local_matches = mystnodes.get("local_matches") or {}
+    for node in _portal_nodes(mystnodes):
+        node_id = str(node.get("id") or "")
+        name = str(node.get("name") or "")
+        local_ip = str(node.get("localIp") or "")
+        match = local_matches.get(node_id) or {}
+        container = str(match.get("container_name") or match.get("name") or "")
+        host = str(match.get("host") or "")
+        portal_node_local_match.labels(node_id, name, local_ip, container, host).set(1 if match else 0)
+
+
+def _portal_nodes(mystnodes: dict) -> list[dict]:
+    nodes_data = ((mystnodes.get("endpoints") or {}).get("nodes") or {}).get("data") or {}
+    nodes = nodes_data.get("nodes") if isinstance(nodes_data, dict) else None
+    return [node for node in nodes or [] if isinstance(node, dict)]
+
+
+def _set_numeric(gauge: Gauge, metric: str, value: object) -> None:
+    try:
+        gauge.labels(metric).set(float(value))
+    except (TypeError, ValueError):
+        return
+
+
+def _set_numeric_with_labels(gauge: Gauge, labels: tuple[str, ...], value: object) -> None:
+    try:
+        gauge.labels(*labels).set(float(value))
+    except (TypeError, ValueError):
+        return
+
+
+def _sum_node_earnings(earnings: object) -> float:
+    if not isinstance(earnings, list):
+        return 0.0
+    total = 0.0
+    for item in earnings:
+        if not isinstance(item, dict):
+            continue
+        try:
+            total += float(item.get("etherAmount") or 0)
+        except (TypeError, ValueError):
+            continue
+    return total
