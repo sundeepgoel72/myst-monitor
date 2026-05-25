@@ -29,3 +29,25 @@ def test_match_local_nodes_uses_portal_local_ip() -> None:
     assert matches["portal-1"]["container_name"] == "myst.12.x"
     assert matches["portal-1"]["running"] is True
     assert matches["portal-1"]["log_counts"]["error_or_warning"] == 2
+
+
+def test_match_local_nodes_handles_host_network_container() -> None:
+    matches = _match_local_nodes(
+        [{"id": "portal-1", "name": "1.x-hp400", "localIp": "192.168.1.72"}],
+        [
+            {
+                "name": "myst.1.x",
+                "container_name": "myst.1.x",
+                "host": "192.168.1.72",
+                "running": True,
+                "status": "running",
+                "restart_count": 0,
+                "uptime_seconds": 120,
+                "networks": [{"name": "host", "ip_address": ""}],
+                "log_counts": {"error_or_warning": 0},
+                "warnings": [],
+            }
+        ],
+    )
+
+    assert matches["portal-1"]["container_name"] == "myst.1.x"

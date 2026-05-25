@@ -251,6 +251,8 @@ def _match_local_nodes(portal_nodes: list[dict[str, Any]], local_nodes: list[dic
             ip_address = network.get("ip_address")
             if ip_address:
                 by_ip[str(ip_address)] = local_node
+            if network.get("name") == "host" and local_node.get("host"):
+                by_ip[str(local_node["host"])] = local_node
 
     matches: dict[str, dict[str, Any]] = {}
     for portal_node in portal_nodes:
