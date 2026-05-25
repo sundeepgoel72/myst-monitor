@@ -112,6 +112,69 @@ class HistoryStore:
         record = self._record_query("SELECT * FROM collections ORDER BY collected_at DESC, id DESC LIMIT 1")
         return _record_dict(record) if record else None
 
+    def overall(self, limit: int = 100) -> dict[str, Any]:
+        rows = self._collection_rows(limit)
+        return {
+            "ok": True,
+            "count": len(rows),
+            "collections": [
+                {
+                    **_record_dict(record),
+                    "fleet": _fleet_summary(list(self._nodes_for_collection(record.id).values())),
+                }
+                for record in rows
+            ],
+        }
+
+    def nodes(self, latest_only: bool = True, limit: int = 100) -> dict[str, Any]:
+        if latest_only:
+            latest = self._record_query("SELECT * FROM collections ORDER BY collected_at DESC, id DESC LIMIT 1")
+            if latest is None:
+                return {"ok": True, "count": 0, "nodes": []}
+            nodes = list(self._nodes_for_collection(latest.id).values())
+            return {
+                "ok": True,
+                "collection": _record_dict(latest),
+                "count": len(nodes),
+                "nodes": [_public_node(row) for row in nodes],
+            }
+        with self._connect() as db:
+            rows = db.execute(
+                """
+                SELECT *
+                FROM node_metrics
+                ORDER BY collected_at DESC, node_name
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return {"ok": True, "count": len(rows), "nodes": [_public_node(dict(row)) for row in rows]}
+
+    def node(self, node: str, limit: int = 100) -> dict[str, Any]:
+        pattern = f"%{node}%"
+        with self._connect() as db:
+            rows = db.execute(
+                """
+                SELECT *
+                FROM node_metrics
+                WHERE node_key = ?
+                   OR identity = ?
+                   OR node_name = ?
+                   OR node_name LIKE ?
+                   OR container_name = ?
+                ORDER BY collected_at DESC
+                LIMIT ?
+                """,
+                (node, node, node, pattern, node, limit),
+            ).fetchall()
+        public_rows = [_public_node(dict(row)) for row in rows]
+        return {
+            "ok": True,
+            "node": node,
+            "count": len(public_rows),
+            "history": public_rows,
+        }
+
     def delta(self, hours: int = 24, now: datetime | None = None) -> dict[str, Any]:
         latest = self._record_query("SELECT * FROM collections ORDER BY collected_at DESC, id DESC LIMIT 1")
         if latest is None:
@@ -171,6 +234,22 @@ class HistoryStore:
             ).fetchall()
         return {str(row["node_key"]): dict(row) for row in rows}
 
+    def _collection_rows(self, limit: int) -> list[CollectionRecord]:
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM collections ORDER BY collected_at DESC, id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [
+            CollectionRecord(
+                id=int(row["id"]),
+                collected_at=_parse_time(row["collected_at"]) or datetime.now(UTC),
+                counts=json.loads(row["counts_json"]),
+                snapshot=json.loads(row["snapshot_json"]),
+            )
+            for row in rows
+        ]
+
 
 def _record_dict(record: CollectionRecord | None) -> dict[str, Any] | None:
     if record is None:
@@ -179,6 +258,31 @@ def _record_dict(record: CollectionRecord | None) -> dict[str, Any] | None:
         "id": record.id,
         "collected_at": record.collected_at.isoformat(),
         "counts": record.counts,
+    }
+
+
+def _public_node(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "collection_id": row.get("collection_id"),
+        "collected_at": row.get("collected_at"),
+        "node_key": row.get("node_key"),
+        "node_name": row.get("node_name"),
+        "identity": row.get("identity"),
+        "local_ip": row.get("local_ip"),
+        "host": row.get("host"),
+        "container_name": row.get("container_name"),
+        "running": row.get("running"),
+        "online": row.get("online"),
+        "quality": row.get("quality"),
+        "earnings_total": row.get("earnings_total"),
+        "uptime_seconds": row.get("uptime_seconds"),
+        "uptime_minutes_24h": row.get("uptime_minutes_24h"),
+        "restart_count": row.get("restart_count"),
+        "log_error_or_warning": row.get("log_error_or_warning"),
+        "log_identity_warning": row.get("log_identity_warning"),
+        "log_promise": row.get("log_promise"),
+        "log_session": row.get("log_session"),
+        "local_match": row.get("local_match"),
     }
 
 

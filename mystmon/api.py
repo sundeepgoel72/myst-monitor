@@ -73,11 +73,29 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
         latest = history.latest_collection()
         return {"ok": latest is not None, "collection": latest}
 
+    @app.get("/api/v1/history/overall")
+    async def history_overall(limit: int = 100) -> dict:
+        if history is None:
+            return {"ok": False, "reason": "history_disabled"}
+        return history.overall(limit=max(1, min(limit, 1000)))
+
     @app.get("/api/v1/history/delta")
     async def history_delta(hours: int = 24) -> dict:
         if history is None:
             return {"ok": False, "reason": "history_disabled", "hours": hours}
         return history.delta(hours=hours)
+
+    @app.get("/api/v1/history/nodes")
+    async def history_nodes(latest_only: bool = True, limit: int = 100) -> dict:
+        if history is None:
+            return {"ok": False, "reason": "history_disabled"}
+        return history.nodes(latest_only=latest_only, limit=max(1, min(limit, 1000)))
+
+    @app.get("/api/v1/history/nodes/{node}")
+    async def history_node(node: str, limit: int = 100) -> dict:
+        if history is None:
+            return {"ok": False, "reason": "history_disabled", "node": node}
+        return history.node(node=node, limit=max(1, min(limit, 1000)))
 
     @app.post("/api/v1/telegram/test")
     async def telegram_test() -> dict:

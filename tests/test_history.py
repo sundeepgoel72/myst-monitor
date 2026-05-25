@@ -66,6 +66,25 @@ def test_history_skips_unreachable_placeholders_when_portal_nodes_exist(tmp_path
     assert [node["node_name"] for node in delta["nodes"]] == ["Node One"]
 
 
+def test_history_exposes_overall_and_node_sqlite_views(tmp_path) -> None:
+    store = HistoryStore(str(tmp_path / "mystmon.db"))
+    store.append_snapshot(_snapshot(datetime(2026, 5, 24, 2, 0, tzinfo=UTC), earnings=10.0, quality=2.0))
+    store.append_snapshot(_snapshot(datetime(2026, 5, 25, 3, 0, tzinfo=UTC), earnings=12.5, quality=2.5))
+
+    overall = store.overall(limit=10)
+    latest_nodes = store.nodes()
+    all_node_rows = store.nodes(latest_only=False, limit=10)
+    node_history = store.node("Node", limit=10)
+
+    assert overall["count"] == 2
+    assert overall["collections"][0]["fleet"]["earnings_total"] == 12.5
+    assert latest_nodes["count"] == 1
+    assert latest_nodes["nodes"][0]["node_name"] == "Node One"
+    assert all_node_rows["count"] == 2
+    assert node_history["count"] == 2
+    assert node_history["history"][0]["earnings_total"] == 12.5
+
+
 def _snapshot(collected_at: datetime, earnings: float, quality: float, warnings: int = 0) -> dict:
     return {
         "generated_at": collected_at.isoformat(),

@@ -167,7 +167,10 @@ Core endpoints:
 - `GET /api/v1/snapshot`
 - `POST /api/v1/collect`
 - `GET /api/v1/history/latest`
+- `GET /api/v1/history/overall?limit=100`
 - `GET /api/v1/history/delta?hours=24`
+- `GET /api/v1/history/nodes`
+- `GET /api/v1/history/nodes/{node}?limit=100`
 - `POST /api/v1/telegram/test`
 - `POST /api/v1/telegram/report?hours=24`
 - `GET /metrics`
