@@ -73,7 +73,7 @@ def format_daily_report(delta: dict[str, Any], service_name: str, hours: int = 2
     latest = delta.get("latest") or {}
     lines = [
         "<b>MystMon daily report</b>",
-        f"{html.escape(service_name)} · last {hours}h",
+        f"{html.escape(service_name)} - last {hours}h",
         f"Snapshot: {html.escape(str(latest.get('collected_at', 'unknown')))}",
         "",
         f"Fleet earnings: {_fmt(current.get('earnings_total'), 6)} ({_signed(changes.get('earnings_total'), 6)})",
@@ -83,23 +83,36 @@ def format_daily_report(delta: dict[str, Any], service_name: str, hours: int = 2
         f"Warnings/errors: {_fmt(current.get('log_error_or_warning'), 0)} ({_signed(changes.get('log_error_or_warning'), 0)})",
         "",
     ]
-    notable = _notable_nodes(delta.get("nodes") or [])
-    lines.extend(notable if notable else ["No notable node changes."])
+    nodes = delta.get("nodes") or []
+    lines.extend(_all_node_lines(nodes))
+    alerts = _attention_lines(nodes)
+    if alerts:
+        lines.append("")
+        lines.extend(alerts)
     return "\n".join(lines)
 
 
-def _notable_nodes(nodes: list[dict[str, Any]]) -> list[str]:
-    earnings = sorted(
-        nodes,
-        key=lambda node: _number((node.get("delta") or {}).get("earnings_total")),
-        reverse=True,
-    )[:5]
-    lines = ["Top earnings changes:"]
-    for node in earnings:
-        change = (node.get("delta") or {}).get("earnings_total")
-        if change == "unknown" or _number(change) == 0:
-            continue
-        lines.append(f"- {html.escape(str(node.get('node_name')))}: {_signed(change, 6)}")
+def _all_node_lines(nodes: list[dict[str, Any]]) -> list[str]:
+    lines = ["Per-node:"]
+    if not nodes:
+        return lines + ["- no node history available"]
+    for node in sorted(nodes, key=lambda item: str(item.get("node_name") or "")):
+        current = node.get("current") or {}
+        changes = node.get("delta") or {}
+        online = "online" if current.get("online") == 1 else "offline" if current.get("online") == 0 else "unknown"
+        lines.append(
+            "- "
+            f"{html.escape(str(node.get('node_name')))}: "
+            f"{online}, "
+            f"earn {_fmt(current.get('earnings_total'), 6)} ({_signed(changes.get('earnings_total'), 6)}), "
+            f"quality {_fmt(current.get('quality'), 2)} ({_signed(changes.get('quality'), 2)}), "
+            f"restarts {_fmt(current.get('restart_count'), 0)} ({_signed(changes.get('restart_count'), 0)}), "
+            f"warn {_fmt(current.get('log_error_or_warning'), 0)} ({_signed(changes.get('log_error_or_warning'), 0)})"
+        )
+    return lines
+
+
+def _attention_lines(nodes: list[dict[str, Any]]) -> list[str]:
     alerts: list[str] = []
     for node in nodes:
         current = node.get("current") or {}
@@ -116,10 +129,8 @@ def _notable_nodes(nodes: list[dict[str, Any]]) -> list[str]:
         if reasons:
             alerts.append(f"- {html.escape(str(node.get('node_name')))}: {', '.join(reasons)}")
     if alerts:
-        lines.append("")
-        lines.append("Attention:")
-        lines.extend(alerts[:8])
-    return lines
+        return ["Attention:"] + alerts[:8]
+    return []
 
 
 def _fmt(value: Any, digits: int) -> str:

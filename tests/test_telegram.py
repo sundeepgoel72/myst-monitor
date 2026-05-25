@@ -48,8 +48,10 @@ def test_format_daily_report_includes_earnings_and_variations() -> None:
 
     assert "Fleet earnings: 12.500000 (+2.500000)" in message
     assert "Avg quality: 2.25 (-0.20)" in message
-    assert "Node One: +2.500000" in message
+    assert "Per-node:" in message
+    assert "Node One: online, earn unknown (+2.500000), quality unknown (-0.10)" in message
     assert "Node Two: offline" in message
+    assert "Attention:" in message
 
 
 def test_next_report_delay_uses_configured_local_time() -> None:
