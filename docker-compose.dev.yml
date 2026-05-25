@@ -10,6 +10,8 @@ services:
       MYSTMON_LOG_LEVEL: INFO
       MYSTMON_POLL_INTERVAL_SECONDS: ${MYSTMON_POLL_INTERVAL_SECONDS:-3600}
       MYSTNODES_REQUEST_DELAY_SECONDS: ${MYSTNODES_REQUEST_DELAY_SECONDS:-1.0}
+      MYSTNODES_RETRY_COUNT: ${MYSTNODES_RETRY_COUNT:-2}
+      MYSTNODES_RETRY_DELAY_SECONDS: ${MYSTNODES_RETRY_DELAY_SECONDS:-2.0}
       MYSTMON_TEQUILAPI_PASSWORD: ${MYSTMON_TEQUILAPI_PASSWORD:-}
       MYSTMON_SSH_PASSWORD: ${MYSTMON_SSH_PASSWORD:-}
       MYSTNODES_EMAIL: ${MYSTNODES_EMAIL:-}
@@ -36,6 +38,8 @@ services:
           password_env: MYSTNODES_PASSWORD
           remember: true
           request_delay_seconds: ${MYSTNODES_REQUEST_DELAY_SECONDS:-1.0}
+          retry_count: ${MYSTNODES_RETRY_COUNT:-2}
+          retry_delay_seconds: ${MYSTNODES_RETRY_DELAY_SECONDS:-2.0}
           node_detail_enabled: true
           node_services_enabled: false
           node_totals_enabled: true

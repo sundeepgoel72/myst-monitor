@@ -49,3 +49,5 @@ def test_mystnodes_portal_config_defaults_to_disabled() -> None:
     assert config.mystnodes.base_url == "https://my.mystnodes.com"
     assert config.mystnodes.email_env == "MYSTNODES_EMAIL"
     assert config.mystnodes.password_env == "MYSTNODES_PASSWORD"
+    assert config.mystnodes.retry_count == 2
+    assert config.mystnodes.retry_delay_seconds == 2.0

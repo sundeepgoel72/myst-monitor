@@ -55,7 +55,7 @@ class CollectorScheduler:
 
         if self.config.mystnodes.enabled:
             try:
-                mystnodes_portal = await collect_mystnodes_portal(self.config.mystnodes, timeout)
+                mystnodes_portal = await collect_mystnodes_portal(self.config.mystnodes, timeout, myst_nodes)
                 counts["mystnodes"] = len(mystnodes_portal.get("endpoints", {}))
             except Exception:
                 LOGGER.exception("MystNodes portal collection failed")
