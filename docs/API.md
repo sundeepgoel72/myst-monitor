@@ -79,6 +79,22 @@ Runs an immediate collection pass for enabled Prometheus and SNMP targets.
 }
 ```
 
+## `GET /api/v1/history/latest`
+
+Returns the latest persisted collection metadata from SQLite.
+
+## `GET /api/v1/history/delta?hours=24`
+
+Returns fleet and per-node changes between the latest collection and the nearest collection at or before the requested lookback window.
+
+## `POST /api/v1/telegram/test`
+
+Sends a short Telegram test message using `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
+
+## `POST /api/v1/telegram/report?hours=24`
+
+Sends a Telegram earnings and metric-variation report for the requested lookback window.
+
 ## `GET /metrics`
 
 Returns the latest numeric readings in Prometheus text format.

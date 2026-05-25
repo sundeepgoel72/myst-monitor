@@ -11,14 +11,18 @@ from prometheus_client import CollectorRegistry, Gauge, generate_latest
 
 from mystmon import __version__
 from mystmon.config import MystMonConfig, load_config
+from mystmon.history import HistoryStore
 from mystmon.scheduler import CollectorScheduler
 from mystmon.storage import ReadingStore
+from mystmon.telegram import TelegramNotifier
 
 
 def create_app(config: MystMonConfig | None = None) -> FastAPI:
     app_config = config or load_config()
     store = ReadingStore()
-    scheduler = CollectorScheduler(app_config, store)
+    history = HistoryStore(app_config.history.db_path) if app_config.history.enabled else None
+    telegram = TelegramNotifier(app_config.telegram, history, app_config.service.name)
+    scheduler = CollectorScheduler(app_config, store, history, telegram)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -35,6 +39,8 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
     )
     app.state.config = app_config
     app.state.store = store
+    app.state.history = history
+    app.state.telegram = telegram
     app.state.scheduler = scheduler
 
     @app.get("/health")
@@ -59,6 +65,27 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
     @app.post("/api/v1/collect")
     async def collect_now() -> dict[str, int]:
         return await scheduler.collect_once()
+
+    @app.get("/api/v1/history/latest")
+    async def history_latest() -> dict:
+        if history is None:
+            return {"ok": False, "reason": "history_disabled"}
+        latest = history.latest_collection()
+        return {"ok": latest is not None, "collection": latest}
+
+    @app.get("/api/v1/history/delta")
+    async def history_delta(hours: int = 24) -> dict:
+        if history is None:
+            return {"ok": False, "reason": "history_disabled", "hours": hours}
+        return history.delta(hours=hours)
+
+    @app.post("/api/v1/telegram/test")
+    async def telegram_test() -> dict:
+        return await telegram.send_test()
+
+    @app.post("/api/v1/telegram/report")
+    async def telegram_report(hours: int = 24) -> dict:
+        return await telegram.send_report(hours=hours, force=True)
 
     @app.get("/metrics")
     async def metrics() -> Response:

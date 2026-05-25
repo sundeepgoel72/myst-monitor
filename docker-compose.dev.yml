@@ -16,6 +16,8 @@ services:
       MYSTMON_SSH_PASSWORD: ${MYSTMON_SSH_PASSWORD:-}
       MYSTNODES_EMAIL: ${MYSTNODES_EMAIL:-}
       MYSTNODES_PASSWORD: ${MYSTNODES_PASSWORD:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       MYSTMON_EXPECTED_NODE_COUNT: "8"
       MYSTMON_CONFIG_YAML: |
         service:
@@ -115,6 +117,16 @@ services:
         outputs:
           latest_json_path: /data/mystmon/latest.json
           snmp_extend_path: /data/mystmon/snmp_extend.txt
+        history:
+          enabled: true
+          db_path: /data/mystmon/mystmon.db
+        telegram:
+          enabled: true
+          bot_token_env: TELEGRAM_BOT_TOKEN
+          chat_id_env: TELEGRAM_CHAT_ID
+          report_time_local: "08:00"
+          timezone: Asia/Kolkata
+          disable_notification: false
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /mnt/ssd/mystmon-dev/data:/data/mystmon

@@ -153,6 +153,20 @@ class OutputConfig(BaseModel):
     snmp_extend_path: str = "/data/mystmon/snmp_extend.txt"
 
 
+class HistoryConfig(BaseModel):
+    enabled: bool = True
+    db_path: str = "/data/mystmon/mystmon.db"
+
+
+class TelegramConfig(BaseModel):
+    enabled: bool = False
+    bot_token_env: str = "TELEGRAM_BOT_TOKEN"
+    chat_id_env: str = "TELEGRAM_CHAT_ID"
+    report_time_local: str = "08:00"
+    timezone: str = "Asia/Kolkata"
+    disable_notification: bool = False
+
+
 class MystMonConfig(BaseModel):
     service: ServiceConfig = Field(default_factory=ServiceConfig)
     prometheus: PrometheusConfig = Field(default_factory=PrometheusConfig)
@@ -160,6 +174,8 @@ class MystMonConfig(BaseModel):
     myst: MystCollectorConfig = Field(default_factory=MystCollectorConfig)
     mystnodes: MystNodesPortalConfig = Field(default_factory=MystNodesPortalConfig)
     outputs: OutputConfig = Field(default_factory=OutputConfig)
+    history: HistoryConfig = Field(default_factory=HistoryConfig)
+    telegram: TelegramConfig = Field(default_factory=TelegramConfig)
 
 
 def load_config(path: str | os.PathLike[str] | None = None) -> MystMonConfig:
