@@ -5,5 +5,6 @@ After=docker.service network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/mnt/ssd/mystmon-prod
-ExecStart=/usr/bin/docker compose run --rm mystmon-prod python -c "import asyncio; from mystmon.api import create_app; app=create_app(); asyncio.run(app.state.scheduler.collect_once())"
+WorkingDirectory=/mnt/ssd/projects/mystmon
+ExecStart=/usr/bin/docker compose run --rm mystmon python -c "import asyncio; from mystmon.api import create_app; app=create_app(); asyncio.run(app.state.scheduler.collect_once())"
+

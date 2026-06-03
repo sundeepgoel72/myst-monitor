@@ -3,7 +3,6 @@ set -euo pipefail
 
 expected="${MYSTMON_EXPECTED_NODE_COUNT:-8}"
 base_url="${MYSTMON_BASE_URL:-http://127.0.0.1:8072}"
-data_dir="${MYSTMON_DATA_DIR:-/mnt/ssd/mystmon-prod/data}"
 
 echo "Triggering MystMon collection..."
 curl -fsS -X POST "$base_url/api/v1/collect" >/tmp/mystmon-collect.json
@@ -33,6 +32,6 @@ if [[ "$count" != "$expected" ]]; then
 fi
 
 curl -fsS "$base_url/metrics" | grep -E 'mystmon_node_(running|api_up|api_metric)' | head -40
-test -s "$data_dir/latest.json"
-test -s "$data_dir/snmp_extend.txt"
+test -s /mnt/ssd/projects/mystmon/data/latest.json
+test -s /mnt/ssd/projects/mystmon/data/snmp_extend.txt
 echo "MystMon validation passed for $count MYST containers."

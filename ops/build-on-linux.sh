@@ -3,7 +3,7 @@ set -euo pipefail
 
 host="${MYSTMON_BUILD_HOST:-192.168.1.72}"
 user="${MYSTMON_BUILD_USER:-}"
-remote_dir="${MYSTMON_DEV_DIR:-/mnt/ssd/mystmon-dev}"
+remote_dir="${MYSTMON_REMOTE_DIR:-/mnt/ssd/projects/mystmon}"
 start="${1:-}"
 
 target="$host"
@@ -17,10 +17,10 @@ trap 'rm -f "$archive"' EXIT
 git archive --format=tar --output="$archive" HEAD
 ssh "$target" "mkdir -p $remote_dir"
 scp "$archive" "$target:$remote_dir/mystmon-build.tar"
-ssh "$target" "cd $remote_dir && tar -xf mystmon-build.tar && if [ ! -f .env ]; then cp .env.example .env; fi && docker compose -f docker-compose.yml -f docker-compose.dev.yml build mystmon-dev"
+ssh "$target" "cd $remote_dir && tar -xf mystmon-build.tar && if [ ! -f .env ]; then cp .env.example .env; fi && docker compose pull mystmon"
 
 if [[ "$start" == "--start" ]]; then
-  ssh "$target" "cd $remote_dir && docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d mystmon-dev && MYSTMON_BASE_URL=http://127.0.0.1:8073 MYSTMON_DATA_DIR=$remote_dir/data ./ops/validate-mystmon.sh"
+  ssh "$target" "cd $remote_dir && docker compose up -d mystmon"
 fi
 
 echo "MystMon install completed on $target in $remote_dir"

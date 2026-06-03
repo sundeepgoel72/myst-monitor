@@ -2,7 +2,7 @@
 
 MystMon follows the operating constraints from the maintenance handover:
 
-- It runs on `192.168.1.72` from `/mnt/ssd/mystmon-prod` for prod and `/mnt/ssd/mystmon-dev` for dev.
+- It runs on `192.168.1.72` from `/mnt/ssd/projects/mystmon`.
 - It performs read-only Docker inspection and log collection.
 - It does not unlock identities, alter wallet state, or restart MYST containers.
 - It writes `/data/mystmon/latest.json` for debugging and `/data/mystmon/snmp_extend.txt` for existing SNMP-style monitoring.
@@ -22,14 +22,18 @@ Known hosts from the handover:
 Useful install commands on `.72`:
 
 ```bash
-cd /mnt/ssd/mystmon-prod
+cd /mnt/ssd/projects/mystmon
 cp .env.example .env
 vi .env
-docker compose pull mystmon-prod
-docker compose up -d mystmon-prod
+docker compose pull mystmon
+docker compose up -d mystmon
 bash ops/install-systemd-timer.sh
-MYSTMON_BASE_URL=http://127.0.0.1:8072 MYSTMON_DATA_DIR=/mnt/ssd/mystmon-prod/data ./ops/validate-mystmon.sh
+./ops/validate-mystmon.sh
 ```
+
+If the host is still on the legacy path `/mnt/ssd/codex/mystmon`, run the migration checklist first:
+
+- [HP400_PATH_MIGRATION.md](/mnt/ssd/projects/mystmon/docs/HP400_PATH_MIGRATION.md)
 
 Cron fallback:
 

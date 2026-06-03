@@ -1,1 +1,1 @@
-0 */6 * * * cd /mnt/ssd/mystmon-prod && /usr/bin/docker compose run --rm mystmon-prod python -c "import asyncio; from mystmon.api import create_app; app=create_app(); asyncio.run(app.state.scheduler.collect_once())"
+0 */6 * * * cd /mnt/ssd/projects/mystmon && /usr/bin/docker compose run --rm mystmon python -c "import asyncio; from mystmon.api import create_app; app=create_app(); asyncio.run(app.state.scheduler.collect_once())"
