@@ -1,10 +1,26 @@
-from mystmon.api import create_app
-from mystmon.api import _set_portal_metrics
+from pathlib import Path
+
 from prometheus_client import CollectorRegistry, Gauge, generate_latest
+from mystmon.api import _set_portal_metrics
+from mystmon.api import create_app
+from mystmon.config import MystMonConfig
 
 
-def test_create_app_imports_collectors() -> None:
-    app = create_app()
+def test_create_app_imports_collectors(tmp_path: Path) -> None:
+    config = MystMonConfig.model_validate(
+        {
+            "service": {"data_dir": str(tmp_path)},
+            "outputs": {
+                "latest_json_path": str(tmp_path / "latest.json"),
+                "snmp_extend_path": str(tmp_path / "snmp_extend.txt"),
+            },
+            "history": {
+                "enabled": True,
+                "db_path": str(tmp_path / "mystmon.db"),
+            },
+        }
+    )
+    app = create_app(config)
 
     assert app.title == "MystMon API"
 
