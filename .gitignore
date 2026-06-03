@@ -4,6 +4,11 @@ __pycache__/
 .venv/
 venv/
 .env
+.aider*
+.codex/
+.agents/
+docs/HANDOVER.md
+docs/HANDOVER_CONTEXT_*.md
 dist/
 build/
 *.egg-info/
