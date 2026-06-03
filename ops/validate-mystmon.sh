@@ -32,6 +32,7 @@ if [[ "$count" != "$expected" ]]; then
 fi
 
 curl -fsS "$base_url/metrics" | grep -E 'mystmon_node_(running|api_up|api_metric)' | head -40
-test -s /mnt/ssd/projects/mystmon/data/latest.json
-test -s /mnt/ssd/projects/mystmon/data/snmp_extend.txt
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+test -s "$repo_dir/data/latest.json"
+test -s "$repo_dir/data/snmp_extend.txt"
 echo "MystMon validation passed for $count MYST containers."

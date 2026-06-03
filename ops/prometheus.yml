@@ -5,5 +5,5 @@ scrape_configs:
   - job_name: mystmon
     static_configs:
       - targets:
-          - 192.168.1.72:8072
-          - 192.168.1.72:8073
+          - <mystmon-host>:8072
+          - <mystmon-host>:8073

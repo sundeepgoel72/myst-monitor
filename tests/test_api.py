@@ -47,7 +47,7 @@ def test_portal_metrics_include_quality_and_earnings() -> None:
                                 "id": "n1",
                                 "name": "node-one",
                                 "identity": "0xabc",
-                                "localIp": "192.168.1.72",
+                                "localIp": "example-local-ip",
                                 "nodeStatus": {"online": True, "quality": 2.6},
                                 "earnings": [{"etherAmount": "1.25"}, {"etherAmount": "2"}],
                             }
@@ -56,7 +56,7 @@ def test_portal_metrics_include_quality_and_earnings() -> None:
                 },
             },
             "node_details": {"nodes": {"n1": {"detail": {"data": {"uptimeMinLast24H": 1436}}}}},
-            "local_matches": {"n1": {"container_name": "myst.1.x", "host": "192.168.1.72"}},
+            "local_matches": {"n1": {"container_name": "myst.1.x", "host": "example-host"}},
         },
         summary,
         online,
@@ -69,6 +69,6 @@ def test_portal_metrics_include_quality_and_earnings() -> None:
     metrics = generate_latest(registry).decode()
 
     assert 'summary{metric="nodes_total"} 1.0' in metrics
-    assert 'quality{identity="0xabc",local_ip="192.168.1.72",name="node-one",node_id="n1"} 2.6' in metrics
-    assert 'earnings{identity="0xabc",local_ip="192.168.1.72",name="node-one",node_id="n1"} 3.25' in metrics
-    assert 'uptime{identity="0xabc",local_ip="192.168.1.72",name="node-one",node_id="n1"} 1436.0' in metrics
+    assert 'quality{identity="0xabc",local_ip="example-local-ip",name="node-one",node_id="n1"} 2.6' in metrics
+    assert 'earnings{identity="0xabc",local_ip="example-local-ip",name="node-one",node_id="n1"} 3.25' in metrics
+    assert 'uptime{identity="0xabc",local_ip="example-local-ip",name="node-one",node_id="n1"} 1436.0' in metrics

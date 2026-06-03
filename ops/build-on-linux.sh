@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-host="${MYSTMON_BUILD_HOST:-192.168.1.72}"
+host="${MYSTMON_BUILD_HOST:?Set MYSTMON_BUILD_HOST to the SSH host}"
 user="${MYSTMON_BUILD_USER:-}"
-remote_dir="${MYSTMON_REMOTE_DIR:-/mnt/ssd/projects/mystmon}"
+remote_dir="${MYSTMON_REMOTE_DIR:?Set MYSTMON_REMOTE_DIR to the remote install path}"
 start="${1:-}"
 
 target="$host"

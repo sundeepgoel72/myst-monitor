@@ -50,8 +50,8 @@ def test_history_skips_unreachable_placeholders_when_portal_nodes_exist(tmp_path
     snapshot = _snapshot(datetime(2026, 5, 25, 3, 0, tzinfo=UTC), earnings=12.5, quality=2.5)
     snapshot["nodes"].append(
         {
-            "name": "unreachable-192.168.1.174",
-            "host": "192.168.1.174",
+            "name": "unreachable-remote-host",
+            "host": "remote-host-2",
             "running": False,
             "restart_count": 0,
             "uptime_seconds": 0,
@@ -92,7 +92,7 @@ def _snapshot(collected_at: datetime, earnings: float, quality: float, warnings:
         "nodes": [
             {
                 "name": "myst.1.x",
-                "host": "192.168.1.72",
+                "host": "example-host",
                 "running": True,
                 "restart_count": 0,
                 "uptime_seconds": 100,
@@ -108,7 +108,7 @@ def _snapshot(collected_at: datetime, earnings: float, quality: float, warnings:
                                 "id": "node-1",
                                 "name": "Node One",
                                 "identity": "0xabc",
-                                "localIp": "192.168.1.72",
+                                "localIp": "example-local-ip",
                                 "nodeStatus": {"online": True, "quality": quality},
                                 "earnings": [{"etherAmount": earnings}],
                             }
@@ -126,7 +126,7 @@ def _snapshot(collected_at: datetime, earnings: float, quality: float, warnings:
             "local_matches": {
                 "node-1": {
                     "container_name": "myst.1.x",
-                    "host": "192.168.1.72",
+                    "host": "example-host",
                 }
             },
         },

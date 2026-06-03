@@ -16,7 +16,7 @@ snmp:
 
 myst:
   enabled: true
-  local_host: 192.168.1.72
+  local_host: localhost
   docker_socket: unix:///var/run/docker.sock
   container_name_patterns:
     - ^myst(\.|$)
@@ -52,25 +52,25 @@ myst:
       metric_prefix: nat
   containers:
     - name: myst.1.x
-      host: 192.168.1.72
+      host: localhost
     - name: myst.12.x
-      host: 192.168.1.72
+      host: localhost
     - name: myst.17.x
-      host: 192.168.1.72
+      host: localhost
     - name: myst.18.x
-      host: 192.168.1.72
+      host: localhost
   remote_hosts:
     - host: 192.168.1.173
-      user: sundeep
+      user: username
       password_env: MYSTMON_SSH_PASSWORD
     - host: 192.168.1.174
-      user: sundeep
+      user: username
       password_env: MYSTMON_SSH_PASSWORD
     - host: 192.168.1.175
-      user: sundeep
+      user: username
       password_env: MYSTMON_SSH_PASSWORD
     - host: 192.168.1.176
-      user: sundeep
+      user: username
       password_env: MYSTMON_SSH_PASSWORD
 
 outputs:

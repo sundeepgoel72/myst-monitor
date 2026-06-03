@@ -13,7 +13,7 @@ def test_snmp_target_requires_oids() -> None:
             "targets": [
                 {
                     "name": "switch",
-                    "host": "192.168.1.72",
+                    "host": "example-host",
                     "oids": {"sys_uptime": "1.3.6.1.2.1.1.3.0"},
                 }
             ]
@@ -22,7 +22,7 @@ def test_snmp_target_requires_oids() -> None:
 
     config = MystMonConfig.model_validate(payload)
 
-    assert config.snmp.targets[0].host == "192.168.1.72"
+    assert config.snmp.targets[0].host == "example-host"
 
 
 def test_myst_defaults_use_known_build_host() -> None:

@@ -43,13 +43,13 @@ class SnmpTarget(BaseModel):
 
 class SnmpConfig(BaseModel):
     enabled: bool = True
-    default_community: str = "public"
+    default_community: str = "community"
     targets: list[SnmpTarget] = Field(default_factory=list)
 
 
 class MystContainerConfig(BaseModel):
     name: str
-    host: str = "192.168.1.72"
+    host: str = "localhost"
     expected_network: str | None = None
     expected_port_range: str | None = None
     tequilapi_port: int | None = None
@@ -57,7 +57,7 @@ class MystContainerConfig(BaseModel):
 
 class MystRemoteHostConfig(BaseModel):
     host: str
-    user: str = "sundeep"
+    user: str = "username"
     password_env: str | None = None
     enabled: bool = True
 
@@ -70,7 +70,7 @@ class TequilApiEndpointConfig(BaseModel):
 
 class MystCollectorConfig(BaseModel):
     enabled: bool = True
-    local_host: str = "192.168.1.72"
+    local_host: str = "localhost"
     docker_socket: str = "unix:///var/run/docker.sock"
     container_name_patterns: list[str] = Field(default_factory=lambda: [r"^myst(\.|$)", r"^myst[0-9]"])
     api_probe_enabled: bool = True

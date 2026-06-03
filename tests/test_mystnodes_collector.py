@@ -7,19 +7,19 @@ def test_match_local_nodes_uses_portal_local_ip() -> None:
             {
                 "id": "portal-1",
                 "name": "node-one",
-                "localIp": "192.168.12.71",
+                "localIp": "192.0.2.71",
             }
         ],
         [
             {
                 "name": "myst.12.x",
                 "container_name": "myst.12.x",
-                "host": "192.168.1.72",
+                "host": "example-host",
                 "running": True,
                 "status": "running",
                 "restart_count": 0,
                 "uptime_seconds": 120,
-                "networks": [{"name": "ipvlan12", "ip_address": "192.168.12.71"}],
+                "networks": [{"name": "ipvlan12", "ip_address": "192.0.2.71"}],
                 "log_counts": {"error_or_warning": 2},
                 "warnings": ["failed to sign metrics"],
             }
@@ -33,12 +33,12 @@ def test_match_local_nodes_uses_portal_local_ip() -> None:
 
 def test_match_local_nodes_handles_host_network_container() -> None:
     matches = _match_local_nodes(
-        [{"id": "portal-1", "name": "1.x-hp400", "localIp": "192.168.1.72"}],
+        [{"id": "portal-1", "name": "node-one", "localIp": "example-host"}],
         [
             {
                 "name": "myst.1.x",
                 "container_name": "myst.1.x",
-                "host": "192.168.1.72",
+                "host": "example-host",
                 "running": True,
                 "status": "running",
                 "restart_count": 0,

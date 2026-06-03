@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_dir="${MYSTMON_REMOTE_DIR:-/mnt/ssd/projects/mystmon}"
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "$repo_dir"
 test -f .env || {
-  echo "Missing $repo_dir/.env. Create it from .env.example and fill local secrets on .72." >&2
+  echo "Missing $repo_dir/.env. Create it from .env.example and fill local secrets locally." >&2
   exit 1
 }
 

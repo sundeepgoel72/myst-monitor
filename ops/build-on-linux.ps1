@@ -6,11 +6,11 @@ param(
 )
 
 if ([string]::IsNullOrWhiteSpace($HostName)) {
-    $HostName = "192.168.1.72"
+    throw "Set MYSTMON_BUILD_HOST to the SSH host."
 }
 
 if ([string]::IsNullOrWhiteSpace($RemoteDir)) {
-    $RemoteDir = "/mnt/ssd/projects/mystmon"
+    throw "Set MYSTMON_REMOTE_DIR to the remote install path."
 }
 
 $target = $HostName

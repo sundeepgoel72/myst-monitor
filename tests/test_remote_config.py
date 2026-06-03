@@ -7,8 +7,8 @@ def test_remote_host_config_uses_password_env_not_secret_value() -> None:
             "myst": {
                 "remote_hosts": [
                     {
-                        "host": "192.168.1.173",
-                        "user": "sundeep",
+                        "host": "remote-host-1",
+                        "user": "username",
                         "password_env": "MYSTMON_SSH_PASSWORD",
                     }
                 ]
