@@ -44,6 +44,8 @@ def render_snmp_extend(snapshot: dict[str, Any]) -> str:
                 f"mystnodes.endpoint_count={len(mystnodes.get('endpoints', {}))}",
             ]
         )
+        if mystnodes.get("wallet_address"):
+            lines.append(f"mystnodes.wallet_address={mystnodes.get('wallet_address')}")
     for node in snapshot.get("nodes", []):
         prefix = sanitize_key(node.get("name", "unknown"))
         lines.extend(

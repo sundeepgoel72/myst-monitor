@@ -16,9 +16,12 @@ actual="$(python3 - <<'PY'
 import json
 with open("/tmp/mystmon-snapshot.json", "r", encoding="utf-8") as handle:
     snapshot = json.load(handle)
+portal = snapshot.get("mystnodes") or {}
 nodes = snapshot.get("nodes", [])
 real_nodes = [node for node in nodes if node.get("status") != "unreachable"]
 print(len(real_nodes))
+if portal:
+    print(f"wallet_address={portal.get('wallet_address')}")
 for node in nodes:
     print(f"{node.get('name')} running={node.get('running')} restarts={node.get('restart_count')} api_up={(node.get('api') or {}).get('up')}")
 PY
@@ -28,6 +31,11 @@ echo "$actual"
 count="$(echo "$actual" | head -n 1)"
 if [[ "$count" != "$expected" ]]; then
   echo "Expected $expected MYST containers, found $count" >&2
+  exit 1
+fi
+
+if grep -q '^wallet_address=$' <<<"$actual"; then
+  echo "MystNodes wallet address was not populated in the snapshot" >&2
   exit 1
 fi
 

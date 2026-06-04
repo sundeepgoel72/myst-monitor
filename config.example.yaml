@@ -25,6 +25,7 @@ myst:
   api_default_port: 4050
   api_username:
   api_password_env:
+  wallet_address: "0x9A183F79b7b803DF658DB0aC6159f0016e9db4bE"
   api_endpoints:
     - name: healthcheck
       path: /healthcheck
@@ -50,6 +51,9 @@ myst:
     - name: nat_type
       path: /nat/type
       metric_prefix: nat
+    - name: wallet_balance
+      path: /api/v2/node/balance
+      metric_prefix: wallet_balance
   containers:
     - name: myst.1.x
       host: localhost

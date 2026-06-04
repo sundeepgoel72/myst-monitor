@@ -1,4 +1,4 @@
 services:
   mystmon:
     build: .
-    image: ${MYSTMON_IMAGE:-mystmon:0.72}
+    image: ${MYSTMON_IMAGE:-mystmon:0.73}

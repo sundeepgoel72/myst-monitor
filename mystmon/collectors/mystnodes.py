@@ -38,6 +38,7 @@ async def collect_mystnodes_portal(
             "enabled": True,
             "authenticated": bool(token),
             "base_url": config.base_url,
+            "wallet_address": config.wallet_address,
             "endpoints": {},
         }
         if not token:
@@ -94,15 +95,19 @@ async def _fetch_endpoint(
     headers: dict[str, str],
 ) -> dict[str, Any]:
     method = endpoint.method.upper()
+    params = dict(endpoint.params)
+    if endpoint.name == "wallet_balance" and config.wallet_address:
+        params.setdefault("walletAddress", config.wallet_address)
+        params.setdefault("address", config.wallet_address)
     LOGGER.info(
         "MystNodes portal API call method=%s endpoint=%s path=%s params=%s",
         method,
         endpoint.name,
         endpoint.path,
-        endpoint.params,
+        params,
     )
     try:
-        result = await _request_json(client, config, method, endpoint.path, params=endpoint.params, headers=headers)
+        result = await _request_json(client, config, method, endpoint.path, params=params, headers=headers)
         _log_endpoint_result(endpoint.name, result)
         return result
     except httpx.HTTPError as exc:

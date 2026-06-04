@@ -49,5 +49,24 @@ def test_mystnodes_portal_config_defaults_to_disabled() -> None:
     assert config.mystnodes.base_url == "https://my.mystnodes.com"
     assert config.mystnodes.email_env == "MYSTNODES_EMAIL"
     assert config.mystnodes.password_env == "MYSTNODES_PASSWORD"
+    assert config.mystnodes.wallet_address == "0x9A183F79b7b803DF658DB0aC6159f0016e9db4bE"
     assert config.mystnodes.retry_count == 2
     assert config.mystnodes.retry_delay_seconds == 2.0
+
+
+def test_local_config_overrides_tracked_config(tmp_path) -> None:
+    config_file = tmp_path / "config.yaml"
+    local_file = tmp_path / "config.local.yaml"
+    config_file.write_text(
+        'mystnodes:\n  enabled: false\n  wallet_address: "0x1111111111111111111111111111111111111111"\n',
+        encoding="utf-8",
+    )
+    local_file.write_text(
+        'mystnodes:\n  enabled: true\n  wallet_address: "0x2222222222222222222222222222222222222222"\n',
+        encoding="utf-8",
+    )
+
+    config = load_config(config_file)
+
+    assert config.mystnodes.enabled is True
+    assert config.mystnodes.wallet_address == "0x2222222222222222222222222222222222222222"

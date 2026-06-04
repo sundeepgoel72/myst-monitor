@@ -117,6 +117,7 @@ class MystNodesPortalConfig(BaseModel):
     base_url: str = "https://my.mystnodes.com"
     email_env: str = "MYSTNODES_EMAIL"
     password_env: str = "MYSTNODES_PASSWORD"
+    wallet_address: str | None = "0x9A183F79b7b803DF658DB0aC6159f0016e9db4bE"
     remember: bool = True
     request_delay_seconds: float = Field(default=1.0, ge=0)
     retry_count: int = Field(default=2, ge=0)
@@ -185,9 +186,28 @@ def load_config(path: str | os.PathLike[str] | None = None) -> MystMonConfig:
         return MystMonConfig.model_validate(raw_inline)
 
     config_path = Path(path or os.getenv("MYSTMON_CONFIG", "config.yaml"))
-    if not config_path.exists():
+    raw = _load_yaml_file(config_path)
+    if raw is None:
         return MystMonConfig()
 
-    with config_path.open("r", encoding="utf-8") as handle:
-        raw: dict[str, Any] = yaml.safe_load(handle) or {}
+    local_override = config_path.with_name("config.local.yaml")
+    if local_override != config_path:
+        raw = _deep_merge_dicts(raw, _load_yaml_file(local_override) or {})
     return MystMonConfig.model_validate(raw)
+
+
+def _load_yaml_file(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    with path.open("r", encoding="utf-8") as handle:
+        return yaml.safe_load(handle) or {}
+
+
+def _deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(merged.get(key), dict) and isinstance(value, dict):
+            merged[key] = _deep_merge_dicts(merged[key], value)
+        else:
+            merged[key] = value
+    return merged

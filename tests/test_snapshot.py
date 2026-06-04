@@ -39,10 +39,11 @@ def test_snapshot_can_include_mystnodes_portal() -> None:
     snapshot = build_snapshot(
         [],
         {"myst": 0, "mystnodes": 1},
-        {"authenticated": True, "endpoints": {"me": {"ok": True}}},
+        {"authenticated": True, "wallet_address": "0x9A183F79b7b803DF658DB0aC6159f0016e9db4bE", "endpoints": {"me": {"ok": True}}},
     )
     rendered = render_snmp_extend(snapshot)
 
     assert snapshot["mystnodes"]["authenticated"] is True
     assert "mystnodes.authenticated=1" in rendered
     assert "mystnodes.endpoint_count=1" in rendered
+    assert "mystnodes.wallet_address=0x9A183F79b7b803DF658DB0aC6159f0016e9db4bE" in rendered
