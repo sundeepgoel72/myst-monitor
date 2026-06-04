@@ -2,6 +2,10 @@
 
 MystMon is a lightweight monitoring service for MYST passive-income nodes. It polls local Docker containers, optional TequilAPI endpoints, and optional MystNodes portal data, then exposes the results through Prometheus, JSON, and SNMP-friendly text output.
 
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE) for the full text.
+
 ## Features
 
 - Docker-based service with `docker compose`
