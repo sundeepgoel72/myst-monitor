@@ -11,6 +11,7 @@ config.local.yaml
 .agents/
 docs/HANDOVER.md
 docs/HANDOVER_CONTEXT_*.md
+CURRENT_STATUS.md
 dist/
 build/
 *.egg-info/
