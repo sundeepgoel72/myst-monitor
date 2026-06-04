@@ -64,17 +64,17 @@ myst:
     - name: myst.18.x
       host: localhost
   remote_hosts:
-    - host: 192.168.1.173
-      user: username
+    - host: remote-host-1
+      user: remote-user
       password_env: MYSTMON_SSH_PASSWORD
-    - host: 192.168.1.174
-      user: username
+    - host: remote-host-2
+      user: remote-user
       password_env: MYSTMON_SSH_PASSWORD
-    - host: 192.168.1.175
-      user: username
+    - host: remote-host-3
+      user: remote-user
       password_env: MYSTMON_SSH_PASSWORD
-    - host: 192.168.1.176
-      user: username
+    - host: remote-host-4
+      user: remote-user
       password_env: MYSTMON_SSH_PASSWORD
 
 outputs:
