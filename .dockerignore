@@ -1,10 +1,49 @@
+# Git
 .git
-.venv
-__pycache__
+.gitignore
+
+# Documentation
+docs/
+*.md
+!config.example.yaml
+
+# Tests
+tests/
+pytest.ini
+
+# Development
+.venv/
+__pycache__/
 *.pyc
-.pytest_cache
-.env
-dist
-build
-*.egg-info
-data
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Data
+data/
+*.db
+*.sqlite
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+.dockerignore

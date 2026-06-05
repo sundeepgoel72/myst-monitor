@@ -1,82 +1,126 @@
+# MystMon Configuration Example
+# Copy to config.yaml and modify as needed
+
 service:
-  name: mystmon
-  poll_interval_seconds: 21600
+  name: "mystmon"
+  poll_interval_seconds: 21600  # 6 hours
   request_timeout_seconds: 10
-  data_dir: /data/mystmon
+  data_dir: "/data/mystmon"
   log_window_seconds: 21600
 
 prometheus:
   enabled: true
   targets: []
+  # - name: "node-exporter"
+  #   url: "http://localhost:9100/metrics"
 
 snmp:
-  enabled: false
-  default_community: public
+  enabled: true
+  default_community: "community"
   targets: []
+  # - name: "router"
+  #   host: "192.168.1.1"
+  #   port: 161
+  #   community: "public"
+  #   oids:
+  #     sysDescr: "1.3.6.1.2.1.1.1.0"
+  #     sysUpTime: "1.3.6.1.2.1.1.3.0"
 
 myst:
   enabled: true
-  local_host: localhost
-  docker_socket: unix:///var/run/docker.sock
+  local_host: "localhost"
+  docker_socket: "unix:///var/run/docker.sock"
   container_name_patterns:
-    - ^myst(\.|$)
-    - ^myst[0-9]
+    - "^myst(\\.|$)"
+    - "^myst[0-9]"
   api_probe_enabled: true
   api_default_port: 4050
-  api_username:
-  api_password_env:
-  wallet_address: "0x9A183F79b7b803DF658DB0aC6159f0016e9db4bE"
+  api_username: null
+  api_password_env: "MYSTMON_TEQUILAPI_PASSWORD"
   api_endpoints:
-    - name: healthcheck
-      path: /healthcheck
-      metric_prefix: health
-    - name: identities
-      path: /identities
-      metric_prefix: identities
-    - name: services
-      path: /services
-      metric_prefix: services
-    - name: session_stats_aggregated
-      path: /sessions/stats/aggregated
-      metric_prefix: sessions
-    - name: provider_sessions_1d
-      path: /node/provider/sessions-count?range=1d
-      metric_prefix: provider_sessions_1d
-    - name: provider_sessions_7d
-      path: /node/provider/sessions-count?range=7d
-      metric_prefix: provider_sessions_7d
-    - name: location
-      path: /location
-      metric_prefix: location
-    - name: nat_type
-      path: /nat/type
-      metric_prefix: nat
-    - name: wallet_balance
-      path: /api/v2/node/balance
-      metric_prefix: wallet_balance
-  containers:
-    - name: myst.1.x
-      host: localhost
-    - name: myst.12.x
-      host: localhost
-    - name: myst.17.x
-      host: localhost
-    - name: myst.18.x
-      host: localhost
-  remote_hosts:
-    - host: remote-host-1
-      user: remote-user
-      password_env: MYSTMON_SSH_PASSWORD
-    - host: remote-host-2
-      user: remote-user
-      password_env: MYSTMON_SSH_PASSWORD
-    - host: remote-host-3
-      user: remote-user
-      password_env: MYSTMON_SSH_PASSWORD
-    - host: remote-host-4
-      user: remote-user
-      password_env: MYSTMON_SSH_PASSWORD
+    - name: "healthcheck"
+      path: "/healthcheck"
+      metric_prefix: "health"
+    - name: "identities"
+      path: "/identities"
+      metric_prefix: "identities"
+    - name: "services"
+      path: "/services"
+      metric_prefix: "services"
+    - name: "session_stats_aggregated"
+      path: "/sessions/stats/aggregated"
+      metric_prefix: "sessions"
+    - name: "provider_sessions_1d"
+      path: "/node/provider/sessions-count?range=1d"
+      metric_prefix: "provider_sessions_1d"
+    - name: "provider_sessions_7d"
+      path: "/node/provider/sessions-count?range=7d"
+      metric_prefix: "provider_sessions_7d"
+    - name: "location"
+      path: "/location"
+      metric_prefix: "location"
+    - name: "nat_type"
+      path: "/nat/type"
+      metric_prefix: "nat"
+  containers: []
+  remote_hosts: []
+  # - host: "remote-host"
+  #   user: "username"
+  #   password_env: "MYSTMON_SSH_PASSWORD"
+  #   enabled: true
+
+mystnodes:
+  enabled: false
+  base_url: "https://my.mystnodes.com"
+  email_env: "MYSTNODES_EMAIL"
+  password_env: "MYSTNODES_PASSWORD"
+  wallet_address: "0x9A183F79b7b803DF658DB0aC6159f0016e9db4bE"
+  remember: true
+  request_delay_seconds: 1.0
+  retry_count: 2
+  retry_delay_seconds: 2.0
+  node_detail_enabled: true
+  node_services_enabled: false
+  node_totals_enabled: true
+  node_totals_days: 30
+  endpoints:
+    - name: "me"
+      path: "/api/v2/me"
+    - name: "nodes"
+      path: "/api/v2/node"
+      params:
+        page: 1
+        itemsPerPage: 100
+    - name: "total_earnings"
+      path: "/api/v2/node/total-earnings"
+    - name: "total_transferred"
+      path: "/api/v2/node/total-transferred"
+      params:
+        days: 30
+    - name: "earnings_30d"
+      path: "/api/v2/node/earnings"
+      params:
+        days: 30
 
 outputs:
-  latest_json_path: /data/mystmon/latest.json
-  snmp_extend_path: /data/mystmon/snmp_extend.txt
+  latest_json_path: "/data/mystmon/latest.json"
+  snmp_extend_path: "/data/mystmon/snmp_extend.txt"
+
+history:
+  enabled: true
+  db_path: "/data/mystmon/mystmon.db"
+
+telegram:
+  enabled: false
+  bot_token_env: "TELEGRAM_BOT_TOKEN"
+  chat_id_env: "TELEGRAM_CHAT_ID"
+  report_time_local: "08:00"
+  timezone: "Asia/Kolkata"
+  disable_notification: false
+
+ui:
+  enabled: true
+  path: "/ui"
+  auto_refresh_interval_seconds: 30
+  max_history_points: 500
+  theme: "system"  # light, dark, system
