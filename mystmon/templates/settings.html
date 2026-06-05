@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - {{ service_name }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Settings</h1>
+            <p class="text-gray-500 dark:text-gray-400 mt-1">Configuration and system information</p>
+        </div>
+        <button id="refresh-btn" class="btn-primary" onclick="refreshSettings()">
+            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            Refresh
+        </button>
+    </div>
+
+    <!-- Tabs -->
+    <div class="card">
+        <div class="border-b border-gray-200 dark:border-gray-700">
+            <nav class="flex space-x-8" aria-label="Settings tabs">
+                <button class="tab-btn active" data-tab="config" onclick="switchSettingsTab('config')">Configuration</button>
+                <button class="tab-btn" data-tab="collectors" onclick="switchSettingsTab('collectors')">Collectors</button>
+                <button class="tab-btn" data-tab="portal" onclick="switchSettingsTab('portal')">MystNodes Portal</button>
+                <button class="tab-btn" data-tab="telegram" onclick="switchSettingsTab('telegram')">Telegram</button>
+                <button class="tab-btn" data-tab="system" onclick="switchSettingsTab('system')">System</button>
+            </nav>
+        </div>
+        
+        <div class="card-body">
+            <!-- Configuration Tab -->
+            <div id="settings-config" class="settings-tab">
+                <div class="space-y-6">
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-3">Service Configuration</h3>
+                        <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 max-h-96 overflow-auto">
+                            <pre id="config-json" class="text-sm font-mono text-gray-900 dark:text-gray-100">Loading...</pre>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-3">UI Configuration</h3>
+                        <dl class="grid grid-cols-1 sm:grid-cols-2 gap-4" id="ui-config">
+                            <!-- Populated by JS -->
+                        </dl>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Collectors Tab -->
+            <div id="settings-collectors" class="settings-tab hidden">
+                <div class="space-y-6">
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-3">Collector Status</h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm" id="collectors-table">
+                                <thead>
+                                    <tr class="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                                        <th class="pb-2 px-3">Collector</th>
+                                        <th class="pb-2 px-3">Enabled</th>
+                                        <th class="pb-2 px-3">Last Run</th>
+                                        <th class="pb-2 px-3">Nodes Collected</th>
+                                        <th class="pb-2 px-3">Status</th>
+                                        <th class="pb-2 px-3">Error</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="collectors-body" class="divide-y divide-gray-200 dark:divide-gray-700">
+                                    <tr>
+                                        <td colspan="6" class="text-center text-gray-500 dark:text-gray-400 py-4">Loading...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-3">Collector Configuration</h3>
+                        <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 max-h-96 overflow-auto">
+                            <pre id="collectors-config-json" class="text-sm font-mono text-gray-900 dark:text-gray-100">Loading...</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Portal Tab -->
+            <div id="settings-portal" class="settings-tab hidden">
+                <div class="space-y-6">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white">Portal Connection</h3>
+                        <button class="btn-primary" onclick="testPortalConnection()">Test Connection</button>
+                    </div>
+                    <div id="portal-test-result" class="hidden p-4 rounded-lg"></div>
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-3">Portal Configuration</h3>
+                        <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 max-h-96 overflow-auto">
+                            <pre id="portal-config-json" class="text-sm font-mono text-gray-900 dark:text-gray-100">Loading...</pre>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-3">Wallet Address</h3>
+                        <p class="text-gray-500 dark:text-gray-400" id="wallet-address">Loading...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Telegram Tab -->
+            <div id="settings-telegram" class="settings-tab hidden">
+                <div class="space-y-6">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white">Telegram Notifications</h3>
+                        <button class="btn-primary" onclick="testTelegram()">Send Test Message</button>
+                    </div>
+                    <div id="telegram-test-result" class="hidden p-4 rounded-lg"></div>
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-3">Telegram Configuration</h3>
+                        <dl class="grid grid-cols-1 sm:grid-cols-2 gap-4" id="telegram-config">
+                            <!-- Populated by JS -->
+                        </dl>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-3">Report History</h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm" id="telegram-reports-table">
+                                <thead>
+                                    <tr class="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                                        <th class="pb-2 px-3">Date</th>
+                                        <th class="pb-2 px-3">Sent At</th>
+                                        <th class="pb-2 px-3">Hours</th>
+                                        <th class="pb-2 px-3">Status</th>
+                                        <th class="pb-2 px-3">Message</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="telegram-reports-body" class="divide-y divide-gray-200 dark:divide-gray-700">
+                                    <tr>
+                                        <td colspan="5" class="text-center text-gray-500 dark:text-gray-400 py-4">Loading...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- System Tab -->
+            <div id="settings-system" class="settings-tab">
+                <div class="space-y-6">
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-3">System Information</h3>
+                        <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" id="system-info">
+                            <!-- Populated by JS -->
+                        </dl>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-3">Database Statistics</h3>
+                        <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" id="db-stats">
+                            <!-- Populated by JS -->
+                        </dl>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-3">Disk Usage</h3>
+                        <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" id="disk-usage">
+                            <!-- Populated by JS -->
+                        </dl>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-3">Actions</h3>
+                        <div class="flex flex-wrap gap-3">
+                            <button class="btn-secondary" onclick="triggerCollection()">Run Collection Now</button>
+                            <button class="btn-secondary" onclick="vacuumDatabase()">Vacuum Database</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ ui_path }}/static/js/settings.js"></script>
+{% endblock %}

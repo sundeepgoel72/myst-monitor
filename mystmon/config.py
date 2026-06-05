@@ -168,6 +168,14 @@ class TelegramConfig(BaseModel):
     disable_notification: bool = False
 
 
+class UIConfig(BaseModel):
+    enabled: bool = True
+    path: str = "/ui"
+    auto_refresh_interval_seconds: int = Field(default=30, ge=5)
+    max_history_points: int = Field(default=500, ge=50, le=5000)
+    theme: str = Field(default="system", pattern="^(light|dark|system)$")
+
+
 class MystMonConfig(BaseModel):
     service: ServiceConfig = Field(default_factory=ServiceConfig)
     prometheus: PrometheusConfig = Field(default_factory=PrometheusConfig)
@@ -177,6 +185,7 @@ class MystMonConfig(BaseModel):
     outputs: OutputConfig = Field(default_factory=OutputConfig)
     history: HistoryConfig = Field(default_factory=HistoryConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    ui: UIConfig = Field(default_factory=UIConfig)
 
 
 def load_config(path: str | os.PathLike[str] | None = None) -> MystMonConfig:

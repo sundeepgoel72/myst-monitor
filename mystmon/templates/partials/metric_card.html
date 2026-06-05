@@ -1,0 +1,23 @@
+<div class="card">
+    <div class="card-body">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-sm text-gray-500 dark:text-gray-400">{{ label }}</p>
+                <p class="text-2xl font-bold text-gray-900 dark:text-white" id="{{ value_id }}">{{ value }}</p>
+                {% if change is defined %}
+                <p class="text-sm mt-1" id="{{ change_id }}">{{ change }}</p>
+                {% endif %}
+            </div>
+            <div class="w-12 h-12 rounded-lg bg-primary-100 dark:bg-primary-900 flex items-center justify-center">
+                <svg class="w-6 h-6 text-primary-600 dark:text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ icon_path }}"/>
+                </svg>
+            </div>
+        </div>
+        {% if sparkline_data is defined %}
+        <div class="mt-3 h-12">
+            <canvas id="{{ sparkline_id }}"></canvas>
+        </div>
+        {% endif %}
+    </div>
+</div>

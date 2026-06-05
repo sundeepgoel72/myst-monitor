@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}History - {{ service_name }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">History & Trends</h1>
+            <p class="text-gray-500 dark:text-gray-400 mt-1">Historical fleet performance and trends</p>
+        </div>
+        <div class="flex items-center space-x-3">
+            <button id="refresh-btn" class="btn-primary" onclick="refreshHistory()">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                Refresh
+            </button>
+            <button id="export-btn" class="btn-secondary" onclick="exportHistory()">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                </svg>
+                Export
+            </button>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="card">
+        <div class="card-body">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Time Range</label>
+                    <select id="time-range" class="input-field" onchange="onTimeRangeChange()">
+                        <option value="1">Last Hour</option>
+                        <option value="6">Last 6 Hours</option>
+                        <option value="24" selected>Last 24 Hours</option>
+                        <option value="168">Last 7 Days</option>
+                        <option value="720">Last 30 Days</option>
+                        <option value="custom">Custom...</option>
+                    </select>
+                </div>
+                <div id="custom-range" class="hidden">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Custom Range</label>
+                    <div class="flex items-center space-x-2">
+                        <input type="datetime-local" id="range-start" class="input-field flex-1">
+                        <span class="text-gray-400">to</span>
+                        <input type="datetime-local" id="range-end" class="input-field flex-1">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Metrics</label>
+                    <select id="metrics-select" class="input-field" multiple onchange="updateCharts()">
+                        <option value="online" selected>Nodes Online</option>
+                        <option value="quality" selected>Avg Quality</option>
+                        <option value="earnings" selected>Total Earnings</option>
+                        <option value="restarts">Total Restarts</option>
+                        <option value="errors">Log Errors</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Comparison</label>
+                    <select id="comparison-select" class="input-field" onchange="updateCharts()">
+                        <option value="none">No Comparison</option>
+                        <option value="previous">Previous Period</option>
+                        <option value="week_ago">Week Ago</option>
+                        <option value="month_ago">Month Ago</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="history-summary">
+        <!-- Populated by JS -->
+    </div>
+
+    <!-- Main Chart -->
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Fleet Trends</h3>
+        </div>
+        <div class="card-body">
+            <div class="h-96">
+                <canvas id="fleet-trends-chart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Collection Timeline -->
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Collection Timeline</h3>
+        </div>
+        <div class="card-body">
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm" id="collections-table">
+                    <thead>
+                        <tr class="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                            <th class="pb-2 px-3">Time</th>
+                            <th class="pb-2 px-3">Duration</th>
+                            <th class="pb-2 px-3">Nodes</th>
+                            <th class="pb-2 px-3">Portal</th>
+                            <th class="pb-2 px-3">Prometheus</th>
+                            <th class="pb-2 px-3">SNMP</th>
+                            <th class="pb-2 px-3">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="collections-body" class="divide-y divide-gray-200 dark:divide-gray-700">
+                        <tr>
+                            <td colspan="7" class="text-center text-gray-500 dark:text-gray-400 py-4">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ ui_path }}/static/js/charts.js"></script>
+<script src="{{ ui_path }}/static/js/history.js"></script>
+{% endblock %}

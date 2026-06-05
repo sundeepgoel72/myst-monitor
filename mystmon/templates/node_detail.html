@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+
+{% block title %}{{ node_key }} - {{ service_name }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div class="flex items-center space-x-4">
+            <a href="{{ ui_path }}/fleet" class="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+                </svg>
+            </a>
+            <div>
+                <h1 class="text-2xl font-bold text-gray-900 dark:text-white" id="node-name">{{ node_key }}</h1>
+                <p class="text-gray-500 dark:text-gray-400" id="node-identity">Loading...</p>
+            </div>
+        </div>
+        <div class="flex items-center space-x-3">
+            <button id="refresh-btn" class="btn-primary" onclick="refreshNodeDetail()">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                Refresh
+            </button>
+            <div class="flex items-center space-x-2" id="node-status-badge">
+                <span class="w-3 h-3 rounded-full bg-gray-400"></span>
+                <span class="text-sm font-medium text-gray-500 dark:text-gray-400">Loading...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Key Metrics Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="node-metrics-cards">
+        <!-- Populated by JS -->
+    </div>
+
+    <!-- Tabs -->
+    <div class="card">
+        <div class="border-b border-gray-200 dark:border-gray-700">
+            <nav class="flex space-x-8" aria-label="Tabs">
+                <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
+                <button class="tab-btn" data-tab="metrics" onclick="switchTab('metrics')">Metrics History</button>
+                <button class="tab-btn" data-tab="logs" onclick="switchTab('logs')">Logs</button>
+                <button class="tab-btn" data-tab="earnings" onclick="switchTab('earnings')">Earnings</button>
+                <button class="tab-btn" data-tab="raw" onclick="switchTab('raw')">Raw Data</button>
+            </nav>
+        </div>
+        
+        <div class="card-body">
+            <!-- Overview Tab -->
+            <div id="tab-overview" class="tab-content">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="space-y-4">
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white">Container Info</h3>
+                        <dl class="space-y-3" id="container-info">
+                            <div class="grid grid-cols-2 gap-4">
+                                <dt class="text-gray-500 dark:text-gray-400">Container Name</dt>
+                                <dd class="font-medium" id="ci-name">-</dd>
+                                <dt class="text-gray-500 dark:text-gray-400">Host</dt>
+                                <dd class="font-medium" id="ci-host">-</dd>
+                                <dt class="text-gray-500 dark:text-gray-400">Image</dt>
+                                <dd class="font-medium" id="ci-image">-</dd>
+                                <dt class="text-gray-500 dark:text-gray-400">Network</dt>
+                                <dd class="font-medium" id="ci-network">-</dd>
+                                <dt class="text-gray-500 dark:text-gray-400">Ports</dt>
+                                <dd class="font-medium" id="ci-ports">-</dd>
+                                <dt class="text-gray-500 dark:text-gray-400">Uptime</dt>
+                                <dd class="font-medium" id="ci-uptime">-</dd>
+                                <dt class="text-gray-500 dark:text-gray-400">Restart Count</dt>
+                                <dd class="font-medium" id="ci-restarts">-</dd>
+                                <dt class="text-gray-500 dark:text-gray-400">Created</dt>
+                                <dd class="font-medium" id="ci-created">-</dd>
+                            </div>
+                        </dl>
+                    </div>
+                    <div class="space-y-4">
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white">Portal Info</h3>
+                        <dl class="space-y-3" id="portal-info">
+                            <div class="grid grid-cols-2 gap-4">
+                                <dt class="text-gray-500 dark:text-gray-400">Node ID</dt>
+                                <dd class="font-medium" id="pi-id">-</dd>
+                                <dt class="text-gray-500 dark:text-gray-400">Local IP</dt>
+                                <dd class="font-medium" id="pi-local-ip">-</dd>
+                                <dt class="text-gray-500 dark:text-gray-400">Public IP</dt>
+                                <dd class="font-medium" id="pi-public-ip">-</dd>
+                                <dt class="text-gray-500 dark:text-gray-400">Version</dt>
+                                <dd class="font-medium" id="pi-version">-</dd>
+                                <dt class="text-gray-500 dark:text-gray-400">NAT Type</dt>
+                                <dd class="font-medium" id="pi-nat">-</dd>
+                                <dt class="text-gray-500 dark:text-gray-400">Location</dt>
+                                <dd class="font-medium" id="pi-location">-</dd>
+                                <dt class="text-gray-500 dark:text-gray-400">Local Match</dt>
+                                <dd class="font-medium" id="pi-match">-</dd>
+                            </div>
+                        </dl>
+                    </div>
+                </div>
+                
+                <div class="mt-6">
+                    <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-3">API Endpoints</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm" id="api-endpoints-table">
+                            <thead>
+                                <tr class="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                                    <th class="pb-2 px-3">Endpoint</th>
+                                    <th class="pb-2 px-3">Status</th>
+                                    <th class="pb-2 px-3">Last Check</th>
+                                    <th class="pb-2 px-3">Response Time</th>
+                                </tr>
+                            </thead>
+                            <tbody id="api-endpoints-body" class="divide-y divide-gray-200 dark:divide-gray-700">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Metrics History Tab -->
+            <div id="tab-metrics" class="tab-content hidden">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">Quality Score</h3>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="quality-chart" height="200"></canvas>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">Earnings</h3>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="earnings-chart" height="200"></canvas>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">Uptime %</h3>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="uptime-chart" height="200"></canvas>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">Restarts</h3>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="restarts-chart" height="200"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Logs Tab -->
+            <div id="tab-logs" class="tab-content hidden">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">Log Events (24h)</h3>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="logs-chart" height="200"></canvas>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">Log Counts</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="space-y-3" id="log-counts">
+                                <div class="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                                    <span class="text-gray-500 dark:text-gray-400">Errors/Warnings</span>
+                                    <span class="font-mono font-medium" id="log-errors">-</span>
+                                </div>
+                                <div class="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                                    <span class="text-gray-500 dark:text-gray-400">Identity Warnings</span>
+                                    <span class="font-mono font-medium" id="log-identity">-</span>
+                                </div>
+                                <div class="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                                    <span class="text-gray-500 dark:text-gray-400">Promises</span>
+                                    <span class="font-mono font-medium" id="log-promises">-</span>
+                                </div>
+                                <div class="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                                    <span class="text-gray-500 dark:text-gray-400">Sessions</span>
+                                    <span class="font-mono font-medium" id="log-sessions">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Earnings Tab -->
+            <div id="tab-earnings" class="tab-content hidden">
+                <div class="space-y-6">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4" id="earnings-summary">
+                        <!-- Populated by JS -->
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">Earnings History</h3>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="earnings-history-chart" height="200"></canvas>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">Recent Earnings Details</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-sm" id="earnings-details-table">
+                                    <thead>
+                                        <tr class="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                                            <th class="pb-2 px-3">Date</th>
+                                            <th class="pb-2 px-3">Amount (MYST)</th>
+                                            <th class="pb-2 px-3">Sessions</th>
+                                            <th class="pb-2 px-3">Transferred</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="earnings-details-body" class="divide-y divide-gray-200 dark:divide-gray-700">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Raw Data Tab -->
+            <div id="tab-raw" class="tab-content hidden">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-medium text-gray-900 dark:text-white">Latest Snapshot</h3>
+                    <button class="btn-secondary btn-sm" onclick="copyRawData()">Copy JSON</button>
+                </div>
+                <div class="bg-gray-900 rounded-lg p-4 max-h-96 overflow-auto">
+                    <pre id="raw-data" class="text-green-300 text-sm font-mono whitespace-pre-wrap">Loading...</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ ui_path }}/static/js/charts.js"></script>
+<script src="{{ ui_path }}/static/js/node_detail.js"></script>
+{% endblock %}

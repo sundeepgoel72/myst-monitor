@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI, Response
+from fastapi.staticfiles import StaticFiles
 from prometheus_client import CollectorRegistry, Gauge, generate_latest
 
 from mystmon import __version__
@@ -15,6 +16,7 @@ from mystmon.history import HistoryStore
 from mystmon.scheduler import CollectorScheduler
 from mystmon.storage import ReadingStore
 from mystmon.telegram import TelegramNotifier
+from mystmon.ui import create_ui_router
 
 
 def create_app(config: MystMonConfig | None = None) -> FastAPI:
@@ -42,6 +44,16 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
     app.state.history = history
     app.state.telegram = telegram
     app.state.scheduler = scheduler
+
+    # Mount static files for UI
+    static_dir = Path(__file__).parent / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    # Include UI router if enabled
+    if app_config.ui.enabled:
+        ui_router = create_ui_router(app_config, store, history, telegram, scheduler)
+        app.include_router(ui_router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:
