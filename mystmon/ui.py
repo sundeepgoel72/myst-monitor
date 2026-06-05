@@ -8,6 +8,7 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from mystmon import __version__
 from mystmon.config import MystMonConfig, load_config
 from mystmon.history import HistoryStore
 from mystmon.scheduler import CollectorScheduler
@@ -32,7 +33,7 @@ def create_ui_router(
             "config": config,
             "service_name": config.service.name,
             "ui_path": config.ui.path.rstrip("/"),
-            "version": "0.74.0",
+            "version": __version__,
         }
 
     @router.get(config.ui.path, response_class=HTMLResponse, include_in_schema=False)
@@ -104,7 +105,7 @@ def create_ui_router(
         from datetime import UTC, datetime
 
         info = {
-            "version": "0.74.0",
+            "version": __version__,
             "service_name": config.service.name,
             "uptime_seconds": 0,
             "database": {"enabled": config.history.enabled},

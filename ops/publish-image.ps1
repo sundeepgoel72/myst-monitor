@@ -1,6 +1,6 @@
 param(
     [string]$Image = $env:MYSTMON_IMAGE,
-    [string]$Tag = "0.73"
+    [string]$Tag = "0.74"
 )
 
 if ([string]::IsNullOrWhiteSpace($Image)) {

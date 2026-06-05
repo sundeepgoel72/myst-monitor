@@ -1,11 +1,17 @@
 # MystMon API
 
-MystMon exposes a small API for health checks, configuration visibility, manual collection, latest MYST node snapshots, and Prometheus scraping.
+MystMon exposes a small API for health checks, configuration visibility, manual collection, latest MYST node snapshots, Prometheus scraping, and the browser UI.
 
 Base URL in the default Docker install:
 
 ```text
 http://localhost:8072
+```
+
+Web UI base path:
+
+```text
+http://localhost:8072/ui
 ```
 
 ## `GET /health`
@@ -15,9 +21,25 @@ Returns service status and version.
 ```json
 {
   "status": "ok",
-  "version": "0.73.0"
+  "version": "0.74.0"
 }
 ```
+
+## `GET /ui`
+
+Returns the dashboard UI landing page.
+
+## `GET /ui/fleet`
+
+Returns the fleet overview page.
+
+## `GET /ui/history`
+
+Returns the history and trends page.
+
+## `GET /ui/settings`
+
+Returns the configuration and system settings page.
 
 ## `GET /api/v1/config`
 
@@ -121,3 +143,12 @@ mystmon_node_api_metric{metric="health_uptime_seconds",node="myst.16.x"} 35010.0
 ## OpenAPI
 
 Interactive docs are available at `/docs`. The OpenAPI schema is available at `/openapi.json`.
+
+## UI Support Endpoints
+
+The browser UI also consumes these internal endpoints:
+
+- `GET /api/v1/ui/config`
+- `GET /api/v1/collectors/status`
+- `GET /api/v1/system/info`
+- `GET /api/v1/history/export?format=json|csv&hours=24`

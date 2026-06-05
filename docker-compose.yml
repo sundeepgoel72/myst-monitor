@@ -1,6 +1,6 @@
 services:
   mystmon:
-    image: ${MYSTMON_IMAGE:-ghcr.io/your-org/mystmon:0.73}
+    image: ${MYSTMON_IMAGE:-ghcr.io/your-org/mystmon:0.74}
     container_name: mystmon
     network_mode: host
     environment:

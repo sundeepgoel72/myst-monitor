@@ -1,6 +1,6 @@
-# MystMon 0.73
+# MystMon 0.74
 
-MystMon is a lightweight monitoring service for MYST passive-income nodes. It polls local Docker containers, optional TequilAPI endpoints, and optional MystNodes portal data, then exposes the results through Prometheus, JSON, and SNMP-friendly text output.
+MystMon is a lightweight monitoring service for MYST passive-income nodes. It polls local Docker containers, optional TequilAPI endpoints, and optional MystNodes portal data, then exposes the results through a web UI, Prometheus metrics, JSON snapshots, and SNMP-friendly text output.
 
 ## License
 
@@ -10,6 +10,7 @@ Apache License 2.0. See [LICENSE](LICENSE) for the full text.
 
 - Docker-based service with `docker compose`
 - REST API with OpenAPI docs at `/docs`
+- Web UI at `/ui` with dashboard, fleet, history, and settings pages
 - Prometheus-compatible `/metrics` endpoint
 - Docker/log collector for MYST containers
 - Optional TequilAPI metrics from read-only endpoints
@@ -45,12 +46,24 @@ Open the API locally after starting the service:
 
 ```text
 http://<mystmon-host>:8072/docs
+http://<mystmon-host>:8072/ui
 http://<mystmon-host>:8072/metrics
 ```
 
 ## Configuration
 
 MystMon reads `config.yaml` by default and will also merge `config.local.yaml` when it exists beside it. Keep the tracked example file as the shared baseline, and put machine-specific or secret values in the ignored local override.
+
+UI settings can be customized with the `ui` section:
+
+```yaml
+ui:
+  enabled: true
+  path: /ui
+  auto_refresh_interval_seconds: 30
+  max_history_points: 500
+  theme: system
+```
 
 The default container and host lists are intentionally conservative. Update them to match your own deployment:
 
@@ -146,6 +159,17 @@ extend mystmon /bin/cat <repo-dir>/data/snmp_extend.txt
 - `ops/prometheus.yml` uses placeholder targets so you can map your own hostnames or IPs.
 - `docs/PATH_MIGRATION.md` documents the local path migration flow if you previously installed from an older checkout path.
 - `config.local.yaml` is the preferred local override file for development and testing.
+- The UI is available at `/ui` when `ui.enabled` is true.
+
+## Testing
+
+Run the full test suite locally with:
+
+```bash
+pytest
+```
+
+The GitHub Actions workflow at `.github/workflows/test.yml` runs the same test suite and a `ruff` check on pushes and pull requests to the main development branches.
 
 ## Publishing
 

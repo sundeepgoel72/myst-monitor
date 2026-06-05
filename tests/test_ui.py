@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from mystmon import __version__
 from mystmon.api import create_app
 from mystmon.config import MystMonConfig
 
@@ -24,6 +25,7 @@ def test_ui_dashboard(client):
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "MystMon Dashboard" in response.text
+    assert __version__ in response.text
 
 
 def test_ui_fleet(client):
@@ -65,17 +67,14 @@ def test_ui_api_system_info(client):
     data = response.json()
     assert "version" in data
     assert "database" in data
+    assert data["version"] == __version__
 
 
 def test_ui_disabled(client):
-    # Create app with UI disabled
-    from mystmon.config import MystMonConfig
-    from mystmon.api import create_app
-    
     config = MystMonConfig()
     config.ui.enabled = False
     app = create_app(config)
     test_client = TestClient(app)
-    
+
     response = test_client.get("/ui")
     assert response.status_code == 404
