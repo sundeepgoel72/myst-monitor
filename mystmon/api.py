@@ -305,3 +305,5 @@ def build_snapshot(nodes: List[Dict[str, Any]], collection_counts: Dict[str, int
         "mystnodes": mystnodes_data
     }
 ```
+
+mystmon/__init__.py

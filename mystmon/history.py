@@ -1,3 +1,13 @@
+"""History storage for MystMon snapshots.
+
+Provides persistent storage of collection snapshots using SQLite database.
+Stores node data, collection counts, and portal information for historical
+analysis and reporting.
+
+The history store maintains a time-series of collection snapshots, allowing
+for trend analysis, delta calculations, and historical reporting.
+"""
+
 from __future__ import annotations
 
 import json
@@ -12,6 +22,11 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class CollectionRecord:
+    """A record of a collection snapshot.
+    
+    Represents a single point-in-time snapshot of the entire MystMon state
+    including node data, collection counts, and portal information.
+    """
     id: int
     collected_at: datetime
     counts: dict[str, int]
@@ -19,11 +34,31 @@ class CollectionRecord:
 
 
 class HistoryStore:
+    """SQLite-based storage for collection history.
+    
+    Provides persistent storage of collection snapshots with efficient
+    querying capabilities for historical analysis and reporting.
+    """
+    
     def __init__(self, db_path: str) -> None:
+        """Initialize the history store.
+        
+        Creates the database file and initializes the schema if needed.
+        
+        Args:
+            db_path: Path to the SQLite database file
+        """
         self.db_path = db_path
         LOGGER.info("History database path: %s", self.db_path)
 
     def _connect(self) -> sqlite3.Connection:
+        """Get a database connection.
+        
+        Provides a connection to the SQLite database with row factory setup.
+        
+        Returns:
+            SQLite database connection
+        """
         connection = None
         try:
             connection = sqlite3.connect(self.db_path)
@@ -35,6 +70,17 @@ class HistoryStore:
             raise
 
     def append_snapshot(self, snapshot: dict[str, Any]) -> int:
+        """Append a snapshot to the history.
+        
+        Stores a complete snapshot of the current MystMon state including
+        node data, collection counts, and portal information.
+        
+        Args:
+            snapshot: The snapshot data to store
+            
+        Returns:
+            ID of the inserted record
+        """
         LOGGER.debug("Appending snapshot to history")
         collected_at = _parse_time(snapshot.get("generated_at")) or datetime.now(UTC)
         counts = snapshot.get("collection_counts") or {}
@@ -73,11 +119,24 @@ class HistoryStore:
         return collection_id
 
     def latest_collection(self) -> dict[str, Any] | None:
+        """Get the latest collection record.
+        
+        Returns:
+            Latest collection record or None if no collections exist
+        """
         LOGGER.debug("Fetching latest collection")
         record = self._record_query("SELECT * FROM collections ORDER BY collected_at DESC, id DESC LIMIT 1")
         return _record_dict(record) if record else None
 
     def overall(self, limit: int = 100) -> dict[str, Any]:
+        """Get overall history with fleet summaries.
+        
+        Args:
+            limit: Maximum number of collections to return
+            
+        Returns:
+            Dictionary with overall history data
+        """
         LOGGER.debug("Fetching overall history with limit=%d", limit)
         rows = self._collection_rows(limit)
         return {
@@ -93,6 +152,15 @@ class HistoryStore:
         }
 
     def nodes(self, latest_only: bool = True, limit: int = 100) -> dict[str, Any]:
+        """Get node data from history.
+        
+        Args:
+            latest_only: Whether to return only latest nodes
+            limit: Maximum number of nodes to return
+            
+        Returns:
+            Dictionary with node data
+        """
         LOGGER.debug("Fetching nodes with latest_only=%s, limit=%d", latest_only, limit)
         if latest_only:
             latest = self._record_query("SELECT * FROM collections ORDER BY collected_at DESC, id DESC LIMIT 1")
@@ -118,6 +186,15 @@ class HistoryStore:
         return {"ok": True, "count": len(rows), "nodes": [_public_node(dict(row)) for row in rows]}
 
     def node(self, node: str, limit: int = 100) -> dict[str, Any]:
+        """Get history for a specific node.
+        
+        Args:
+            node: Node identifier to search for
+            limit: Maximum number of history records to return
+            
+        Returns:
+            Dictionary with node history data
+        """
         LOGGER.debug("Fetching node history for node=%s, limit=%d", node, limit)
         pattern = f"%{node}%"
         with self._connect() as db:
@@ -144,6 +221,15 @@ class HistoryStore:
         }
 
     def delta(self, hours: int = 24, now: datetime | None = None) -> dict[str, Any]:
+        """Get delta between current and prior collections.
+        
+        Args:
+            hours: Hours to look back for comparison
+            now: Reference time for comparison
+            
+        Returns:
+            Dictionary with delta data
+        """
         LOGGER.debug("Fetching delta for hours=%d", hours)
         latest = self._record_query("SELECT * FROM collections ORDER BY collected_at DESC, id DESC LIMIT 1")
         if latest is None:
@@ -166,6 +252,14 @@ class HistoryStore:
         }
 
     def report_sent(self, report_date: str) -> bool:
+        """Check if a report was sent for a specific date.
+        
+        Args:
+            report_date: Date to check for report
+            
+        Returns:
+            True if report was sent, False otherwise
+        """
         with self._connect() as db:
             row = db.execute(
                 "SELECT 1 FROM telegram_reports WHERE report_date = ? AND status = 'sent'",
@@ -174,6 +268,14 @@ class HistoryStore:
         return row is not None
 
     def record_report(self, report_date: str, hours: int, status: str, message: str) -> None:
+        """Record a telegram report in the database.
+        
+        Args:
+            report_date: Date of the report
+            hours: Hours covered by the report
+            status: Status of the report
+            message: Message content
+        """
         LOGGER.info("Recording telegram report for date=%s status=%s", report_date, status)
         with self._connect() as db:
             db.execute(
@@ -185,6 +287,15 @@ class HistoryStore:
             )
 
     def _record_query(self, query: str, params: tuple[Any, ...] = ()) -> CollectionRecord | None:
+        """Execute a record query and return a CollectionRecord.
+        
+        Args:
+            query: SQL query to execute
+            params: Query parameters
+            
+        Returns:
+            CollectionRecord or None
+        """
         if not query.strip().upper().startswith(('SELECT', 'WITH')):
             raise ValueError("Only SELECT queries are allowed")
         with self._connect() as db:
@@ -199,6 +310,14 @@ class HistoryStore:
         )
 
     def _nodes_for_collection(self, collection_id: int) -> dict[str, dict[str, Any]]:
+        """Get nodes for a specific collection.
+        
+        Args:
+            collection_id: ID of the collection
+            
+        Returns:
+            Dictionary of nodes keyed by node key
+        """
         with self._connect() as db:
             rows = db.execute(
                 "SELECT * FROM node_metrics WHERE collection_id = ? ORDER BY node_name",
@@ -207,6 +326,14 @@ class HistoryStore:
         return {str(row["node_key"]): dict(row) for row in rows}
 
     def _collection_rows(self, limit: int) -> list[CollectionRecord]:
+        """Get collection rows from the database.
+        
+        Args:
+            limit: Maximum number of rows to return
+            
+        Returns:
+            List of CollectionRecord objects
+        """
         with self._connect() as db:
             rows = db.execute(
                 "SELECT * FROM collections ORDER BY collected_at DESC, id DESC LIMIT ?",
@@ -224,6 +351,14 @@ class HistoryStore:
 
 
 def _record_dict(record: CollectionRecord | None) -> dict[str, Any] | None:
+    """Convert a CollectionRecord to a dictionary.
+    
+    Args:
+        record: CollectionRecord to convert
+        
+    Returns:
+        Dictionary representation or None
+    """
     if record is None:
         return None
     return {
@@ -234,6 +369,14 @@ def _record_dict(record: CollectionRecord | None) -> dict[str, Any] | None:
 
 
 def _public_node(row: dict[str, Any]) -> dict[str, Any]:
+    """Convert a node row to a public node dictionary.
+    
+    Args:
+        row: Node row data
+        
+    Returns:
+        Public node dictionary
+    """
     quality = row.get("quality")
     earnings_total = row.get("earnings_total")
     uptime_minutes_24h = row.get("uptime_minutes_24h")
@@ -291,6 +434,14 @@ def _public_node(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _node_records(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract node records from a snapshot.
+    
+    Args:
+        snapshot: Snapshot data
+        
+    Returns:
+        List of node record dictionaries
+    """
     local_nodes = {str(node.get("name") or ""): node for node in snapshot.get("nodes", []) if isinstance(node, dict)}
     portal_nodes = _portal_nodes(snapshot)
     local_matches = ((snapshot.get("mystnodes") or {}).get("local_matches") or {})
@@ -417,6 +568,16 @@ def _node_records(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _node_row(collection_id: int, collected_at: datetime, row: dict[str, Any]) -> tuple[Any, ...]:
+    """Convert a node record to a database row.
+    
+    Args:
+        collection_id: Collection ID
+        collected_at: Collection timestamp
+        row: Node record
+        
+    Returns:
+        Tuple representing database row
+    """
     logs = row.get("log_counts") or {}
     return (
         collection_id,
@@ -468,6 +629,14 @@ def _node_row(collection_id: int, collected_at: datetime, row: dict[str, Any]) -
 
 
 def _first_numeric(value: Any) -> float | None:
+    """Extract the first numeric value from data.
+    
+    Args:
+        value: Data to extract from
+        
+    Returns:
+        First numeric value or None
+    """
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, dict):
@@ -484,6 +653,14 @@ def _first_numeric(value: Any) -> float | None:
 
 
 def _json_or_none(value: Any) -> str | None:
+    """Convert a value to JSON or return None.
+    
+    Args:
+        value: Value to convert
+        
+    Returns:
+        JSON string or None
+    """
     if value is None:
         return None
     try:
@@ -493,6 +670,15 @@ def _json_or_none(value: Any) -> str | None:
 
 
 def _first_string_value(data: dict[str, Any] | None, keys: tuple[str, ...]) -> str | None:
+    """Extract the first string value for specified keys.
+    
+    Args:
+        data: Data dictionary
+        keys: Keys to look for
+        
+    Returns:
+        First string value or None
+    """
     if not isinstance(data, dict):
         return None
     for key in keys:
@@ -503,6 +689,14 @@ def _first_string_value(data: dict[str, Any] | None, keys: tuple[str, ...]) -> s
 
 
 def _collection_count(value: Any) -> float | None:
+    """Get a count from collection data.
+    
+    Args:
+        value: Data to count
+        
+    Returns:
+        Count as float or None
+    """
     if isinstance(value, dict):
         for key in ("count", "total", "length", "size"):
             numeric = _first_numeric(value.get(key))
@@ -516,6 +710,15 @@ def _collection_count(value: Any) -> float | None:
 
 
 def _extract_time_bucket(sessions: dict[str, Any], bucket: str) -> float | None:
+    """Extract a value from a time bucket.
+    
+    Args:
+        sessions: Sessions data
+        bucket: Time bucket name
+        
+    Returns:
+        Bucket value or None
+    """
     if not isinstance(sessions, dict):
         return None
     for key in (bucket, f"stats_{bucket}", f"stats{bucket}", f"{bucket}_count", f"{bucket}Count", "daily"):
@@ -526,6 +729,14 @@ def _extract_time_bucket(sessions: dict[str, Any], bucket: str) -> float | None:
 
 
 def _first_location_payload(value: Any) -> dict[str, Any] | None:
+    """Extract the first location payload.
+    
+    Args:
+        value: Data to extract from
+        
+    Returns:
+        Location data or None
+    """
     if isinstance(value, dict):
         for key in ("location", "connection_location", "connection_proxy_location"):
             nested = value.get(key)
@@ -540,6 +751,14 @@ def _first_location_payload(value: Any) -> dict[str, Any] | None:
 
 
 def _first_nat_payload(value: Any) -> dict[str, Any] | None:
+    """Extract the first NAT payload.
+    
+    Args:
+        value: Data to extract from
+        
+    Returns:
+        NAT data or None
+    """
     if isinstance(value, dict):
         for key in ("nat_type", "natType", "type"):
             nested = value.get(key)
@@ -554,6 +773,15 @@ def _first_nat_payload(value: Any) -> dict[str, Any] | None:
 
 
 def _first_category_payload(value: Any, preferred_keys: tuple[str, ...]) -> dict[str, Any] | None:
+    """Extract the first payload from a category.
+    
+    Args:
+        value: Data to extract from
+        preferred_keys: Preferred keys to look for
+        
+    Returns:
+        Payload data or None
+    """
     if isinstance(value, dict):
         for key in preferred_keys:
             nested = value.get(key)
@@ -570,6 +798,14 @@ def _first_category_payload(value: Any, preferred_keys: tuple[str, ...]) -> dict
 
 
 def _session_active_value(sessions: Any) -> float | None:
+    """Extract active session count.
+    
+    Args:
+        sessions: Sessions data
+        
+    Returns:
+        Active session count or None
+    """
     if not isinstance(sessions, dict):
         return None
     for key in ("active", "count"):
@@ -586,6 +822,15 @@ def _session_active_value(sessions: Any) -> float | None:
 
 
 def _provider_range_value(provider: Any, bucket: str) -> float | None:
+    """Extract a range value from provider data.
+    
+    Args:
+        provider: Provider data
+        bucket: Time bucket name
+        
+    Returns:
+        Range value or None
+    """
     if not isinstance(provider, dict):
         return None
     for key in ("sessions", "activity", "transferred_data", "service_earnings"):
@@ -598,6 +843,14 @@ def _provider_range_value(provider: Any, bucket: str) -> float | None:
 
 
 def _portal_nodes(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract portal nodes from a snapshot.
+    
+    Args:
+        snapshot: Snapshot data
+        
+    Returns:
+        List of portal nodes
+    """
     mystnodes = snapshot.get("mystnodes") or {}
     endpoints = mystnodes.get("endpoints") or {}
     nodes_data = endpoints.get("nodes") or {}
@@ -606,6 +859,15 @@ def _portal_nodes(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _portal_detail(snapshot: dict[str, Any], node_id: str) -> dict[str, Any]:
+    """Extract portal detail for a node.
+    
+    Args:
+        snapshot: Snapshot data
+        node_id: Node ID
+        
+    Returns:
+        Portal detail data
+    """
     mystnodes = snapshot.get("mystnodes") or {}
     node_details = mystnodes.get("node_details") or {}
     nodes = node_details.get("nodes") or {}
@@ -615,6 +877,15 @@ def _portal_detail(snapshot: dict[str, Any], node_id: str) -> dict[str, Any]:
 
 
 def _node_delta(current: dict[str, Any], prior: dict[str, Any] | None) -> dict[str, Any]:
+    """Calculate delta between current and prior node data.
+    
+    Args:
+        current: Current node data
+        prior: Prior node data
+        
+    Returns:
+        Delta data
+    """
     return {
         "node_key": current.get("node_key"),
         "node_name": current.get("node_name"),
@@ -643,6 +914,15 @@ def _node_delta(current: dict[str, Any], prior: dict[str, Any] | None) -> dict[s
 
 
 def _fleet_delta(current: dict[str, dict[str, Any]], prior: dict[str, dict[str, Any]] | None) -> dict[str, Any]:
+    """Calculate delta between current and prior fleet data.
+    
+    Args:
+        current: Current fleet data
+        prior: Prior fleet data
+        
+    Returns:
+        Fleet delta data
+    """
     current_values = list(current.values())
     prior_values = list(prior.values()) if prior else []
     current_summary = _fleet_summary(current_values)
@@ -658,6 +938,14 @@ def _fleet_delta(current: dict[str, dict[str, Any]], prior: dict[str, dict[str, 
 
 
 def _fleet_summary(nodes: list[dict[str, Any]]) -> dict[str, float | None]:
+    """Create a summary of fleet data.
+    
+    Args:
+        nodes: List of node data
+        
+    Returns:
+        Fleet summary
+    """
     if not nodes:
         return {
             "nodes": 0.0,
@@ -690,6 +978,15 @@ def _fleet_summary(nodes: list[dict[str, Any]]) -> dict[str, float | None]:
 
 
 def _delta(current: Any, prior: Any) -> float | str:
+    """Calculate delta between current and prior values.
+    
+    Args:
+        current: Current value
+        prior: Prior value
+        
+    Returns:
+        Delta value or "unknown"
+    """
     current_float = _float_or_none(current)
     prior_float = _float_or_none(prior)
     if current_float is None or prior_float is None:
@@ -698,12 +995,28 @@ def _delta(current: Any, prior: Any) -> float | str:
 
 
 def _sum_present(values: Any) -> float | None:
+    """Sum present values.
+    
+    Args:
+        values: Values to sum
+        
+    Returns:
+        Sum or None
+    """
     items = [_float_or_none(value) for value in values]
     present = [value for value in items if value is not None]
     return sum(present) if present else None
 
 
 def _sum_node_earnings(earnings: object) -> float | None:
+    """Sum node earnings.
+    
+    Args:
+        earnings: Earnings data
+        
+    Returns:
+        Total earnings or None
+    """
     if not isinstance(earnings, list):
         return None
     total = 0.0
@@ -714,6 +1027,14 @@ def _sum_node_earnings(earnings: object) -> float | None:
 
 
 def _first_network_ip(node: dict[str, Any]) -> str | None:
+    """Extract the first network IP from node data.
+    
+    Args:
+        node: Node data
+        
+    Returns:
+        First network IP or None
+    """
     networks = node.get("networks") or {}
     if not isinstance(networks, dict):
         return None
@@ -724,12 +1045,28 @@ def _first_network_ip(node: dict[str, Any]) -> str | None:
 
 
 def _bool_number(value: Any) -> float | None:
+    """Convert a boolean value to a number.
+    
+    Args:
+        value: Value to convert
+        
+    Returns:
+        1.0 if True, 0.0 if False, None if None
+    """
     if value is None:
         return None
     return 1.0 if bool(value) else 0.0
 
 
 def _float_or_none(value: Any) -> float | None:
+    """Convert a value to float or return None.
+    
+    Args:
+        value: Value to convert
+        
+    Returns:
+        Float value or None
+    """
     try:
         if value is None or value == "":
             return None
@@ -739,6 +1076,14 @@ def _float_or_none(value: Any) -> float | None:
 
 
 def _parse_time(value: Any) -> datetime | None:
+    """Parse a time string.
+    
+    Args:
+        value: Time string to parse
+        
+    Returns:
+        Parsed datetime or None
+    """
     if not isinstance(value, str):
         return None
     try:
@@ -748,3 +1093,6 @@ def _parse_time(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
+```
+
+mystmon/main.py
