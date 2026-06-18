@@ -126,6 +126,3 @@ def next_report_delay(config: Any) -> float:
     except Exception as e:
         logger.warning("Failed to calculate report delay, using default: %s", e)
         return 3600  # 1 hour default
-```
-
-mystmon/snapshot.py

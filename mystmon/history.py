@@ -1093,6 +1093,3 @@ def _parse_time(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
-```
-
-mystmon/main.py

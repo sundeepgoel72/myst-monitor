@@ -166,4 +166,3 @@ class ReadingStore:
                 self._by_source_type[source_type].discard(key)
         
         return count
-```
