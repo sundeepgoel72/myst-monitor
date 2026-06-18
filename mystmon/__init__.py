@@ -21,6 +21,3 @@ The main components are:
 """
 __version__ = "0.75.0-beta.3"
 __author__ = "Sundeep Goel"
-```
-
-mystmon/storage.py

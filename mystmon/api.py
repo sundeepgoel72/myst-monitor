@@ -304,3 +304,8 @@ def build_snapshot(nodes: List[Dict[str, Any]], collection_counts: Dict[str, int
         "collection_counts": collection_counts,
         "mystnodes": mystnodes_data
     }
+```
+
+Now I'll create the missing scheduler module:
+
+mystmon/scheduler.py
