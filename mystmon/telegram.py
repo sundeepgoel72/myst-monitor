@@ -10,6 +10,7 @@ and report settings, and can be triggered manually or on a schedule.
 
 import asyncio
 import logging
+import os
 from datetime import datetime, time
 from typing import Any
 
@@ -34,8 +35,9 @@ class TelegramNotifier:
             config: MystMon configuration containing Telegram settings
         """
         self.config = config
-        self.bot_token = config.telegram.bot_token_env and config.telegram.bot_token_env
-        self.chat_id = config.telegram.chat_id_env and config.telegram.chat_id_env
+        # Fix: Resolve environment variables instead of storing variable names
+        self.bot_token = os.getenv(config.telegram.bot_token_env) if config.telegram.bot_token_env else None
+        self.chat_id = os.getenv(config.telegram.chat_id_env) if config.telegram.chat_id_env else None
         self.enabled = config.telegram.enabled and self.bot_token and self.chat_id
     
     async def send_report(self) -> None:
@@ -126,4 +128,4 @@ def next_report_delay(config: Any) -> float:
         return 3600  # 1 hour default
 ```
 
-mystmon/history.py
+mystmon/snapshot.py
