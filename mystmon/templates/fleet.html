@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}Fleet - {{ service_name }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Fleet Overview</h1>
+            <p class="text-gray-500 dark:text-gray-400 mt-1">All monitored nodes with detailed status</p>
+        </div>
+        <div class="flex items-center space-x-3">
+            <button id="refresh-btn" class="btn-primary" onclick="refreshFleet()">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                Refresh
+            </button>
+            <button id="export-btn" class="btn-secondary" onclick="exportFleet()">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                </svg>
+                Export CSV
+            </button>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card">
+        <div class="card-body">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Search</label>
+                    <input type="text" id="search-input" placeholder="Name, identity, IP..." class="input-field" oninput="debounce(filterTable, 300)()">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
+                    <select id="status-filter" class="input-field" onchange="filterTable()">
+                        <option value="">All</option>
+                        <option value="online">Online</option>
+                        <option value="offline">Offline</option>
+                        <option value="running">Container Running</option>
+                        <option value="stopped">Container Stopped</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Host</label>
+                    <select id="host-filter" class="input-field" onchange="filterTable()">
+                        <option value="">All</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Quality</label>
+                    <select id="quality-filter" class="input-field" onchange="filterTable()">
+                        <option value="">All</option>
+                        <option value="high">High (&ge;80)</option>
+                        <option value="medium">Medium (50-79)</option>
+                        <option value="low">Low (&lt;50)</option>
+                        <option value="unknown">Unknown</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Local Match</label>
+                    <select id="match-filter" class="input-field" onchange="filterTable()">
+                        <option value="">All</option>
+                        <option value="matched">Matched</option>
+                        <option value="unmatched">Unmatched</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fleet Table -->
+    <div class="card">
+        <div class="card-body p-0">
+            <div class="overflow-x-auto">
+                <table class="w-full" id="fleet-table">
+                    <thead class="bg-gray-50 dark:bg-gray-800">
+                        <tr class="text-left text-sm text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                            <th class="px-4 py-3 cursor-pointer" data-sort="node_name">Name <span class="sort-icon">↕</span></th>
+                            <th class="px-4 py-3 cursor-pointer" data-sort="identity">Identity <span class="sort-icon">↕</span></th>
+                            <th class="px-4 py-3 cursor-pointer" data-sort="host">Host <span class="sort-icon">↕</span></th>
+                            <th class="px-4 py-3 cursor-pointer" data-sort="local_ip">Local IP <span class="sort-icon">↕</span></th>
+                            <th class="px-4 py-3 cursor-pointer" data-sort="nat_type">NAT <span class="sort-icon">↕</span></th>
+                            <th class="px-4 py-3 cursor-pointer" data-sort="public_ip">Public IP <span class="sort-icon">↕</span></th>
+                            <th class="px-4 py-3 cursor-pointer" data-sort="location">Location <span class="sort-icon">↕</span></th>
+                            <th class="px-4 py-3 cursor-pointer" data-sort="services">Services <span class="sort-icon">↕</span></th>
+                            <th class="px-4 py-3 cursor-pointer" data-sort="sessions">Sessions <span class="sort-icon">↕</span></th>
+                            <th class="px-4 py-3 cursor-pointer" data-sort="api_status">API</th>
+                            <th class="px-4 py-3 cursor-pointer" data-sort="status">Status</th>
+                            <th class="px-4 py-3 cursor-pointer" data-sort="quality">Quality <span class="sort-icon">↕</span></th>
+                            <th class="px-4 py-3 cursor-pointer" data-sort="earnings">Earnings (24h) <span class="sort-icon">↕</span></th>
+                            <th class="px-4 py-3 cursor-pointer" data-sort="uptime">Uptime (24h) <span class="sort-icon">↕</span></th>
+                            <th class="px-4 py-3 cursor-pointer" data-sort="restarts">Restarts <span class="sort-icon">↕</span></th>
+                            <th class="px-4 py-3 cursor-pointer" data-sort="last_seen">Last Seen <span class="sort-icon">↕</span></th>
+                            <th class="px-4 py-3">Match</th>
+                        </tr>
+                    </thead>
+                    <tbody id="fleet-body" class="divide-y divide-gray-200 dark:divide-gray-700">
+                        <tr>
+                            <td colspan="16" class="text-center text-gray-500 dark:text-gray-400 py-8">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Pagination -->
+            <div id="pagination" class="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between" style="display: none;">
+                <div class="text-sm text-gray-500 dark:text-gray-400">
+                    Showing <span id="showing-start">0</span>-<span id="showing-end">0</span> of <span id="total-rows">0</span> nodes
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button id="prev-page" class="btn-secondary btn-sm" onclick="changePage(-1)" disabled>Previous</button>
+                    <span id="page-info" class="text-sm text-gray-500 dark:text-gray-400">Page 1 of 1</span>
+                    <button id="next-page" class="btn-secondary btn-sm" onclick="changePage(1)" disabled>Next</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Selected nodes summary -->
+    <div id="selection-bar" class="card hidden">
+        <div class="card-body">
+            <div class="flex items-center justify-between">
+                <span id="selection-count" class="font-medium">0 nodes selected</span>
+                <div class="flex items-center space-x-2">
+                    <button class="btn-secondary btn-sm" onclick="viewSelectedHistory()">View History</button>
+                    <button class="btn-secondary btn-sm" onclick="exportSelected()">Export Selected</button>
+                    <button class="btn-secondary btn-sm" onclick="clearSelection()">Clear</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ ui_path }}/static/js/fleet.js"></script>
+{% endblock %}

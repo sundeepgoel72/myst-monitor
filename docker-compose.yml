@@ -1,0 +1,65 @@
+services:
+  mystmon:
+    build: .
+    image: mystmon:local
+    container_name: mystmon
+    ports:
+      - "${MYSTMON_PORT:-8072}:8072"
+    extra_hosts:
+      - "host.docker.internal:172.26.0.1"
+    labels:
+      caddy: http://mystmon.home
+      caddy.reverse_proxy: "host.docker.internal:8072"
+    environment:
+      MYSTMON_DATA_DIR: /data/mystmon
+      MYSTMON_CONFIG: ${MYSTMON_CONFIG:-/app/config.yaml}
+      MYSTMON_HOST: ${MYSTMON_HOST:-0.0.0.0}
+      MYSTMON_PORT: ${MYSTMON_PORT:-8072}
+      MYSTMON_TEQUILAPI_PASSWORD: ${MYSTMON_TEQUILAPI_PASSWORD:-}
+      MYSTMON_SSH_PASSWORD: ${MYSTMON_SSH_PASSWORD:-}
+      MYSTMON_EXPECTED_NODE_COUNT: ${MYSTMON_EXPECTED_NODE_COUNT:-8}
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./data:/data/mystmon
+    networks:
+      default:
+        gw_priority: 1000
+      ipvlan12:
+        ipv4_address: 192.168.12.70
+      ipvlan17:
+        ipv4_address: 192.168.17.70
+      ipvlan18:
+        ipv4_address: 192.168.18.70
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8072/health', timeout=3).read()"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    profiles:
+      - prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    restart: unless-stopped
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.26.0.0/16
+          gateway: 172.26.0.1
+  ipvlan12:
+    external: true
+  ipvlan17:
+    external: true
+  ipvlan18:
+    external: true

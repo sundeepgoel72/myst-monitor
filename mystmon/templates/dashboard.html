@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - {{ service_name }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
+            <p class="text-gray-500 dark:text-gray-400 mt-1">Fleet overview and real-time metrics</p>
+        </div>
+        <div class="flex items-center space-x-3">
+            <button id="refresh-btn" class="btn-primary" onclick="refreshDashboard()">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                Refresh
+            </button>
+            <button id="collect-btn" class="btn-secondary" onclick="triggerCollection()">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                </svg>
+                Collect Now
+            </button>
+        </div>
+    </div>
+
+    <!-- Fleet Summary Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4" id="summary-cards">
+        <!-- Cards will be populated by JS -->
+    </div>
+
+    <!-- Charts Row -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Online Nodes Trend -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Online Nodes (24h)</h3>
+                <div class="flex items-center space-x-2">
+                    <span id="online-trend-value" class="text-sm font-medium text-gray-500 dark:text-gray-400">--</span>
+                    <span id="online-trend-change" class="text-sm"></span>
+                </div>
+            </div>
+            <div class="card-body">
+                <canvas id="online-trend-chart" height="80"></canvas>
+            </div>
+        </div>
+
+        <!-- Quality Trend -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Average Quality (24h)</h3>
+                <div class="flex items-center space-x-2">
+                    <span id="quality-trend-value" class="text-sm font-medium text-gray-500 dark:text-gray-400">--</span>
+                    <span id="quality-trend-change" class="text-sm"></span>
+                </div>
+            </div>
+            <div class="card-body">
+                <canvas id="quality-trend-chart" height="80"></canvas>
+            </div>
+        </div>
+
+        <!-- Earnings Trend -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Total Earnings (24h)</h3>
+                <div class="flex items-center space-x-2">
+                    <span id="earnings-trend-value" class="text-sm font-medium text-gray-500 dark:text-gray-400">--</span>
+                    <span id="earnings-trend-change" class="text-sm"></span>
+                </div>
+            </div>
+            <div class="card-body">
+                <canvas id="earnings-trend-chart" height="80"></canvas>
+            </div>
+        </div>
+
+        <!-- Restarts Trend -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Restarts (24h)</h3>
+                <div class="flex items-center space-x-2">
+                    <span id="restarts-trend-value" class="text-sm font-medium text-gray-500 dark:text-gray-400">--</span>
+                    <span id="restarts-trend-change" class="text-sm"></span>
+                </div>
+            </div>
+            <div class="card-body">
+                <canvas id="restarts-trend-chart" height="80"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alerts & Collector Status -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Recent Alerts -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Recent Alerts</h3>
+            </div>
+            <div class="card-body">
+                <div id="alerts-list" class="space-y-2">
+                    <div class="text-center text-gray-500 dark:text-gray-400 py-4">Loading...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Collector Status -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Collector Status</h3>
+            </div>
+            <div class="card-body">
+                <div id="collectors-list" class="space-y-3">
+                    <div class="text-center text-gray-500 dark:text-gray-400 py-4">Loading...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Node Status -->
+    <div class="card">
+        <div class="card-header flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <h3 class="card-title">Node Quick Status</h3>
+            <a href="{{ ui_path }}/fleet" class="text-sm text-primary-600 dark:text-primary-400 hover:underline">View all nodes →</a>
+        </div>
+        <div class="card-body">
+            <div class="overflow-x-auto">
+                <table class="w-full" id="quick-nodes-table">
+                    <thead>
+                        <tr class="text-left text-sm text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                            <th class="pb-2 px-3">Name</th>
+                            <th class="pb-2 px-3">Status</th>
+                            <th class="pb-2 px-3">API</th>
+                            <th class="pb-2 px-3">NAT</th>
+                            <th class="pb-2 px-3">Public IP</th>
+                            <th class="pb-2 px-3">Location</th>
+                            <th class="pb-2 px-3">Services</th>
+                            <th class="pb-2 px-3">Sessions</th>
+                            <th class="pb-2 px-3">Quality</th>
+                            <th class="pb-2 px-3">Earnings (24h)</th>
+                            <th class="pb-2 px-3">Uptime (24h)</th>
+                            <th class="pb-2 px-3">Restarts</th>
+                            <th class="pb-2 px-3">Last Seen</th>
+                        </tr>
+                    </thead>
+                    <tbody id="quick-nodes-body" class="divide-y divide-gray-200 dark:divide-gray-700">
+                        <tr>
+                            <td colspan="13" class="text-center text-gray-500 dark:text-gray-400 py-4">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ ui_path }}/static/js/charts.js"></script>
+<script src="{{ ui_path }}/static/js/dashboard.js"></script>
+{% endblock %}
