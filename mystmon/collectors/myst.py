@@ -20,7 +20,12 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import httpx
 
-from mystmon.config import MystCollectorConfig, MystContainerConfig, MystRemoteHostConfig
+from mystmon.config import (
+    MystCollectorConfig, 
+    MystContainerConfig, 
+    MystRemoteHostConfig,
+    TequilApiEndpointConfig
+)
 from mystmon.storage import Reading
 
 LOGGER = logging.getLogger(__name__)
@@ -541,7 +546,6 @@ async def _probe_api(
 
 def _create_default_endpoints():
     """Create default endpoint configurations."""
-    from mystmon.config import TequilApiEndpointConfig
     return [TequilApiEndpointConfig(**endpoint) for endpoint in DEFAULT_ENDPOINTS]
 
 
