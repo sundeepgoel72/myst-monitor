@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Callable, List, Optional, Dict
 from enum import Enum
+import hashlib
 
 from mystmon.config import MystMonConfig
 from mystmon.storage import ReadingStore
@@ -21,6 +22,7 @@ class AlertSeverity(Enum):
 class AlertState(Enum):
     FIRING = "firing"
     RESOLVED = "resolved"
+    ACKNOWLEDGED = "acknowledged"
 
 
 @dataclass
@@ -36,6 +38,8 @@ class Alert:
     ends_at: Optional[datetime] = None
     fingerprint: str = ""
     last_updated: datetime = None
+    acknowledged_at: Optional[datetime] = None
+    acknowledged_by: Optional[str] = None
 
 
 class AlertingRule:
@@ -60,6 +64,7 @@ class AlertManager:
     def __init__(self, config: MystMonConfig):
         self.config = config
         self.active_alerts: dict[str, Alert] = {}
+        self.alert_history: list[Alert] = []
         self.alerting_rules: List[AlertingRule] = []
         self._initialize_default_rules()
     
@@ -198,17 +203,22 @@ class AlertManager:
         resolved_alerts = []
         for alert_id, alert in list(self.active_alerts.items()):
             if alert.state == AlertState.RESOLVED and alert.ends_at:
+                # Move resolved alert to history
+                self.alert_history.append(alert)
                 resolved_alerts.append(alert)
                 del self.active_alerts[alert_id]
         
         return all_alerts
     
-    def resolve_alert(self, alert_id: str) -> None:
-        """Mark an alert as resolved."""
+    def acknowledge_alert(self, alert_id: str, acknowledged_by: str = "system") -> bool:
+        """Acknowledge an alert."""
         if alert_id in self.active_alerts:
             alert = self.active_alerts[alert_id]
-            alert.state = AlertState.RESOLVED
-            alert.ends_at = datetime.now()
+            alert.state = AlertState.ACKNOWLEDGED
+            alert.acknowledged_at = datetime.now()
+            alert.acknowledged_by = acknowledged_by
+            return True
+        return False
     
     def get_active_alerts(self) -> List[Alert]:
         """Get all currently active alerts."""
@@ -217,6 +227,11 @@ class AlertManager:
     def get_all_alerts(self) -> List[Alert]:
         """Get all alerts (active and resolved)."""
         return list(self.active_alerts.values())
+    
+    def get_alert_history(self, limit: int = 100) -> List[Alert]:
+        """Get alert history."""
+        # Return the most recent alerts from history
+        return self.alert_history[-limit:] if len(self.alert_history) > limit else self.alert_history
 
 
 def create_default_alert_manager(config: MystMonConfig) -> AlertManager:

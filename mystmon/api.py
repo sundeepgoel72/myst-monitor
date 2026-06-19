@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator, Any
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Response, Query
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import CollectorRegistry, Gauge, generate_latest
@@ -20,7 +20,7 @@ from mystmon.scheduler import CollectorScheduler
 from mystmon.storage import ReadingStore
 from mystmon.telegram import TelegramNotifier
 from mystmon.ui import create_ui_router
-from mystmon.alerting import create_default_alert_manager, Alert
+from mystmon.alerting import create_default_alert_manager, Alert, AlertState
 
 LOGGER = logging.getLogger(__name__)
 
@@ -161,6 +161,21 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
         if alert_manager is None:
             return []
         return [alert.__dict__ for alert in alert_manager.get_active_alerts()]
+
+    @app.get("/api/v1/alerts/history")
+    async def get_alerts_history(limit: int = Query(100, ge=1, le=1000)) -> list[dict]:
+        if alert_manager is None:
+            return []
+        return [alert.__dict__ for alert in alert_manager.get_alert_history(limit=limit)]
+
+    @app.post("/api/v1/alerts/acknowledge")
+    async def acknowledge_alert(alert_id: str, user: str = "system") -> dict:
+        if alert_manager is None:
+            raise HTTPException(status_code=400, detail="Alerting is not enabled")
+        if alert_manager.acknowledge_alert(alert_id, user):
+            return {"status": "acknowledged", "alert_id": alert_id}
+        else:
+            raise HTTPException(status_code=404, detail="Alert not found")
 
     @app.get("/api/v1/alerts/evaluate")
     async def evaluate_alerts() -> list[dict]:

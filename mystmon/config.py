@@ -268,10 +268,29 @@ class UIConfig(BaseModel):
     enable_advanced_filtering: bool = True
 
 
+class EmailNotificationConfig(BaseModel):
+    enabled: bool = False
+    smtp_server: str = ""
+    smtp_port: int = 587
+    username: str = ""
+    password_env: str = ""
+    from_address: str = ""
+    to_addresses: list[str] = Field(default_factory=list)
+
+
+class WebhookNotificationConfig(BaseModel):
+    enabled: bool = False
+    url: str = ""
+    method: str = "POST"
+    headers: dict[str, str] = Field(default_factory=dict)
+
+
 class AlertingConfig(BaseModel):
     enabled: bool = True
     evaluation_interval_seconds: int = Field(default=60, ge=10)
     notification_cooldown_seconds: int = Field(default=3600, ge=60)  # 1 hour
+    email_notifications: EmailNotificationConfig = Field(default_factory=EmailNotificationConfig)
+    webhook_notifications: WebhookNotificationConfig = Field(default_factory=WebhookNotificationConfig)
 
 
 class MystMonConfig(BaseModel):
@@ -301,6 +320,20 @@ def _validate_required_config(config: MystMonConfig) -> None:
                 raise ValueError("account is required for MystNodes accounts")
             if not account.password and not account.password_env:
                 raise ValueError(f"password or password_env is required for MystNodes account {account.account}")
+    
+    # Validate alerting configuration
+    if config.alerting.enabled:
+        if config.alerting.email_notifications.enabled:
+            if not config.alerting.email_notifications.smtp_server:
+                raise ValueError("SMTP server is required for email notifications")
+            if not config.alerting.email_notifications.from_address:
+                raise ValueError("From address is required for email notifications")
+            if not config.alerting.email_notifications.to_addresses:
+                raise ValueError("To addresses are required for email notifications")
+        
+        if config.alerting.webhook_notifications.enabled:
+            if not config.alerting.webhook_notifications.url:
+                raise ValueError("Webhook URL is required for webhook notifications")
 
 
 def load_config(path: str | os.PathLike[str] | None = None) -> MystMonConfig:
