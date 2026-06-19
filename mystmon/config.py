@@ -283,7 +283,7 @@ class MystMonConfig(BaseModel):
     mystnodes_accounts: list[MystNodesPortalAccountConfig] = Field(default_factory=list)
     system: SystemConfig = Field(default_factory=SystemConfig)
     outputs: OutputConfig = Field(default_factory=OutputConfig)
-    history: HistoryStore = Field(default_factory=HistoryConfig)
+    history: HistoryConfig = Field(default_factory=HistoryConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
     alerting: AlertingConfig = Field(default_factory=AlertingConfig)
