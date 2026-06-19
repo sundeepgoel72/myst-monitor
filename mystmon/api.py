@@ -6,7 +6,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncIterator
+from typing import AsyncIterator, Any
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import RedirectResponse
