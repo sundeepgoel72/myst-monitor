@@ -20,7 +20,7 @@ from mystmon.scheduler import CollectorScheduler
 from mystmon.storage import ReadingStore
 from mystmon.telegram import TelegramNotifier
 from mystmon.ui import create_ui_router
-from mystmon.alerting import create_default_alert_manager, Alert, AlertState
+from mystmon.alerting import create_default_alert_manager, Alert, AlertState, AlertGroup
 
 LOGGER = logging.getLogger(__name__)
 
@@ -125,48 +125,76 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
         return {"ok": latest is not None, "collection": latest}
 
     @app.get("/api/v1/history/overall")
-    async def history_overall(limit: int = 100) -> dict:
+    async def history_overall(limit: int = Query(100, ge=1, le=1000)) -> dict:
         if history is None:
             return {"ok": False, "reason": "history_disabled"}
         return history.overall(limit=max(1, min(limit, 1000)))
 
     @app.get("/api/v1/history/delta")
-    async def history_delta(hours: int = 24) -> dict:
+    async def history_delta(hours: int = Query(24, ge=1, le=168)) -> dict:
         if history is None:
             return {"ok": False, "reason": "history_disabled", "hours": hours}
         return history.delta(hours=hours)
 
     @app.get("/api/v1/history/nodes")
-    async def history_nodes(latest_only: bool = True, limit: int = 100) -> dict:
+    async def history_nodes(
+        latest_only: bool = Query(True),
+        limit: int = Query(100, ge=1, le=1000),
+        offset: int = Query(0, ge=0)
+    ) -> dict:
         if history is None:
             return {"ok": False, "reason": "history_disabled"}
-        return history.nodes(latest_only=latest_only, limit=max(1, min(limit, 1000)))
+        return history.nodes(latest_only=latest_only, limit=max(1, min(limit, 1000)), offset=offset)
 
     @app.get("/api/v1/history/nodes/{node}")
-    async def history_node(node: str, limit: int = 100) -> dict:
+    async def history_node(
+        node: str,
+        limit: int = Query(100, ge=1, le=1000),
+        offset: int = Query(0, ge=0)
+    ) -> dict:
         if history is None:
             return {"ok": False, "reason": "history_disabled", "node": node}
-        return history.node(node=node, limit=max(1, min(limit, 1000)))
+        return history.node(node=node, limit=max(1, min(limit, 1000)), offset=offset)
 
     @app.post("/api/v1/telegram/test")
     async def telegram_test() -> dict:
         return await telegram.send_test()
 
     @app.post("/api/v1/telegram/report")
-    async def telegram_report(hours: int = 24) -> dict:
+    async def telegram_report(hours: int = Query(24, ge=1, le=168)) -> dict:
         return await telegram.send_report(hours=hours, force=True)
 
     @app.get("/api/v1/alerts")
-    async def get_alerts() -> list[dict]:
+    async def get_alerts(
+        state: str = Query("active"),
+        severity: str = Query(None)
+    ) -> list[dict]:
         if alert_manager is None:
             return []
-        return [alert.__dict__ for alert in alert_manager.get_active_alerts()]
+        
+        if state == "active":
+            alerts = alert_manager.get_active_alerts()
+        elif state == "suppressed":
+            alerts = alert_manager.get_suppressed_alerts()
+        elif state == "all":
+            alerts = alert_manager.get_all_alerts()
+        else:
+            alerts = alert_manager.get_active_alerts()
+        
+        # Filter by severity if specified
+        if severity:
+            alerts = [alert for alert in alerts if alert.severity.value == severity]
+        
+        return [alert.__dict__ for alert in alerts]
 
     @app.get("/api/v1/alerts/history")
-    async def get_alerts_history(limit: int = Query(100, ge=1, le=1000)) -> list[dict]:
+    async def get_alerts_history(
+        limit: int = Query(100, ge=1, le=1000),
+        offset: int = Query(0, ge=0)
+    ) -> list[dict]:
         if alert_manager is None:
             return []
-        return [alert.__dict__ for alert in alert_manager.get_alert_history(limit=limit)]
+        return [alert.__dict__ for alert in alert_manager.get_alert_history(limit=limit, offset=offset)]
 
     @app.post("/api/v1/alerts/acknowledge")
     async def acknowledge_alert(alert_id: str, user: str = "system") -> dict:
@@ -176,6 +204,30 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
             return {"status": "acknowledged", "alert_id": alert_id}
         else:
             raise HTTPException(status_code=404, detail="Alert not found")
+
+    @app.post("/api/v1/alerts/suppress")
+    async def suppress_alert(alert_id: str, duration_minutes: int = 60) -> dict:
+        if alert_manager is None:
+            raise HTTPException(status_code=400, detail="Alerting is not enabled")
+        from datetime import timedelta
+        if alert_manager.suppress_alert(alert_id, timedelta(minutes=duration_minutes)):
+            return {"status": "suppressed", "alert_id": alert_id, "duration_minutes": duration_minutes}
+        else:
+            raise HTTPException(status_code=404, detail="Alert not found")
+
+    @app.get("/api/v1/alerts/groups")
+    async def get_alert_groups() -> dict:
+        if alert_manager is None:
+            return {}
+        groups = alert_manager.get_alert_groups()
+        return {group_id: {
+            "id": group.id,
+            "name": group.name,
+            "description": group.description,
+            "alert_count": len(group.alerts),
+            "created_at": group.created_at.isoformat(),
+            "last_updated": group.last_updated.isoformat()
+        } for group_id, group in groups.items()}
 
     @app.get("/api/v1/alerts/evaluate")
     async def evaluate_alerts() -> list[dict]:

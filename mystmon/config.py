@@ -268,6 +268,19 @@ class UIConfig(BaseModel):
     enable_advanced_filtering: bool = True
 
 
+class SlackNotificationConfig(BaseModel):
+    enabled: bool = False
+    webhook_url: str = ""
+    channel: str = ""
+    username: str = "MystMon"
+    icon_emoji: str = ":bell:"
+
+
+class DiscordNotificationConfig(BaseModel):
+    enabled: bool = False
+    webhook_url: str = ""
+
+
 class EmailNotificationConfig(BaseModel):
     enabled: bool = False
     smtp_server: str = ""
@@ -291,6 +304,8 @@ class AlertingConfig(BaseModel):
     notification_cooldown_seconds: int = Field(default=3600, ge=60)  # 1 hour
     email_notifications: EmailNotificationConfig = Field(default_factory=EmailNotificationConfig)
     webhook_notifications: WebhookNotificationConfig = Field(default_factory=WebhookNotificationConfig)
+    slack_notifications: SlackNotificationConfig = Field(default_factory=SlackNotificationConfig)
+    discord_notifications: DiscordNotificationConfig = Field(default_factory=DiscordNotificationConfig)
 
 
 class MystMonConfig(BaseModel):
@@ -334,6 +349,14 @@ def _validate_required_config(config: MystMonConfig) -> None:
         if config.alerting.webhook_notifications.enabled:
             if not config.alerting.webhook_notifications.url:
                 raise ValueError("Webhook URL is required for webhook notifications")
+        
+        if config.alerting.slack_notifications.enabled:
+            if not config.alerting.slack_notifications.webhook_url:
+                raise ValueError("Slack webhook URL is required for Slack notifications")
+        
+        if config.alerting.discord_notifications.enabled:
+            if not config.alerting.discord_notifications.webhook_url:
+                raise ValueError("Discord webhook URL is required for Discord notifications")
 
 
 def load_config(path: str | os.PathLike[str] | None = None) -> MystMonConfig:
