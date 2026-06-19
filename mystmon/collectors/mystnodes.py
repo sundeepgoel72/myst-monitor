@@ -40,7 +40,7 @@ async def collect_mystnodes_portal_accounts(
         List of account data or error dictionaries
     """
     if not configs:
-        return None
+        return []
 
     # Filter to only enabled configs for actual collection
     enabled_configs = [config for config in configs if config.enabled]
@@ -52,7 +52,7 @@ async def collect_mystnodes_portal_accounts(
     ]
     
     if not tasks:
-        return None
+        return []
     
     results = await asyncio.gather(*tasks, return_exceptions=True)
     
