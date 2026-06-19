@@ -18,7 +18,6 @@ import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-import docker
 import httpx
 
 from mystmon.config import MystCollectorConfig, MystContainerConfig, MystRemoteHostConfig
@@ -134,6 +133,7 @@ async def _collect_local_containers(config: MystCollectorConfig, timeout_seconds
         List of readings from local containers
     """
     try:
+        import docker
         client = docker.DockerClient(base_url=config.docker_socket)
         containers = client.containers.list(all=True)
     except Exception as exc:
