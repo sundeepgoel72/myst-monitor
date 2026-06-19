@@ -21,6 +21,7 @@ from mystmon.collectors.myst import collect_myst
 from mystmon.collectors.mystnodes import collect_mystnodes_portal_accounts
 from mystmon.collectors.prometheus import collect_prometheus
 from mystmon.collectors.snmp import collect_snmp
+from mystmon.collectors.system import collect_system
 from mystmon.snapshot import render_snmp_extend
 
 if TYPE_CHECKING:
@@ -154,6 +155,13 @@ class CollectorScheduler:
         counts["mystnodes"] = len(portal_data) if portal_data else 0
         LOGGER.info("Collected mystnodes data count=%d", counts["mystnodes"])
         
+        # Collect system metrics
+        system_readings = await collect_system(self.config.service.request_timeout_seconds)
+        for reading in system_readings:
+            self.store.add(reading)
+        counts["system"] = len(system_readings)
+        LOGGER.info("Collected system metrics count=%d", len(system_readings))
+        
         # Build snapshot
         snapshot = self._build_snapshot(myst_readings, portal_data)
         
@@ -179,7 +187,7 @@ class CollectorScheduler:
                 LOGGER.exception("Failed to generate SNMP extend script")
         
         # Export CSV if configured
-        if self.config.outputs.csv_export_path and collection_id is not None:
+        if hasattr(self.config.outputs, 'csv_export_path') and self.config.outputs.csv_export_path and collection_id is not None:
             try:
                 from mystmon.export_csv import write_collection_csv_exports
                 write_collection_csv_exports(
@@ -256,8 +264,14 @@ class CollectorScheduler:
         now = datetime.now(UTC)
         report_date = now.strftime("%Y-%m-%d")
         
+        # Parse report time from config
+        try:
+            report_hour, report_minute = map(int, self.config.telegram.report_time_local.split(":"))
+        except (ValueError, AttributeError):
+            report_hour, report_minute = 8, 0  # Default to 8:00 AM
+            
         # Check if we should send a report (daily at configured time)
-        if now.hour == self.config.telegram.daily_report_hour and now.minute < 5:
+        if now.hour == report_hour and now.minute >= report_minute and now.minute < report_minute + 5:
             if not self.history.report_sent(report_date):
                 try:
                     await self.telegram.send_report()

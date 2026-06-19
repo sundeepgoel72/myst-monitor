@@ -188,6 +188,11 @@ class MystCollectorConfig(BaseModel):
     remote_hosts: list[MystRemoteHostConfig] = Field(default_factory=list)
 
 
+class SystemConfig(BaseModel):
+    enabled: bool = True
+    collect_interval_seconds: int = Field(default=60, ge=10)
+
+
 class MystNodesPortalEndpointConfig(BaseModel):
     name: str
     method: str = "GET"
@@ -237,6 +242,7 @@ class MystNodesPortalAccountConfig(BaseModel):
 class OutputConfig(BaseModel):
     latest_json_path: str = "/data/mystmon/latest.json"
     snmp_extend_path: str = "/data/mystmon/snmp_extend.txt"
+    csv_export_path: str = "/data/mystmon/csv"
 
 
 class HistoryConfig(BaseModel):
@@ -259,6 +265,7 @@ class UIConfig(BaseModel):
     auto_refresh_interval_seconds: int = Field(default=30, ge=5)
     max_history_points: int = Field(default=500, ge=50, le=5000)
     theme: str = Field(default="system", pattern="^(light|dark|system)$")
+    enable_advanced_filtering: bool = True
 
 
 class AlertingConfig(BaseModel):
@@ -274,8 +281,9 @@ class MystMonConfig(BaseModel):
     myst: MystCollectorConfig = Field(default_factory=MystCollectorConfig)
     mystnodes: MystNodesConfig = Field(default_factory=MystNodesConfig)
     mystnodes_accounts: list[MystNodesPortalAccountConfig] = Field(default_factory=list)
+    system: SystemConfig = Field(default_factory=SystemConfig)
     outputs: OutputConfig = Field(default_factory=OutputConfig)
-    history: HistoryConfig = Field(default_factory=HistoryConfig)
+    history: HistoryStore = Field(default_factory=HistoryConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
     alerting: AlertingConfig = Field(default_factory=AlertingConfig)

@@ -289,6 +289,14 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
             registry=registry,
         )
 
+        # System metrics
+        system_cpu_percent = Gauge("mystmon_system_cpu_percent", "System CPU usage percentage.", registry=registry)
+        system_memory_percent = Gauge("mystmon_system_memory_percent", "System memory usage percentage.", registry=registry)
+        system_disk_percent = Gauge("mystmon_system_disk_percent", "System disk usage percentage.", ["mountpoint"], registry=registry)
+        system_network_bytes_sent = Gauge("mystmon_system_network_bytes_sent", "System network bytes sent.", registry=registry)
+        system_network_bytes_recv = Gauge("mystmon_system_network_bytes_recv", "System network bytes received.", registry=registry)
+        system_uptime_seconds = Gauge("mystmon_system_uptime_seconds", "System uptime in seconds.", registry=registry)
+
         # Alert metrics
         alert_gauge = Gauge(
             "mystmon_alerts_active",
@@ -304,6 +312,23 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
         for reading in store.all():
             if isinstance(reading.value, (int, float)):
                 gauge.labels(reading.source_type, reading.source_name, reading.metric).set(reading.value)
+
+        # Add system metrics to Prometheus output
+        for reading in store.by_source_type("system"):
+            if isinstance(reading.value, (int, float)):
+                if reading.metric_name == "cpu_percent":
+                    system_cpu_percent.set(reading.value)
+                elif reading.metric_name == "memory_virtual_percent":
+                    system_memory_percent.set(reading.value)
+                elif reading.metric_name == "disk_percent":
+                    mountpoint = reading.labels.get("mountpoint", "unknown")
+                    system_disk_percent.labels(mountpoint).set(reading.value)
+                elif reading.metric_name == "network_io_bytes_sent":
+                    system_network_bytes_sent.set(reading.value)
+                elif reading.metric_name == "network_io_bytes_recv":
+                    system_network_bytes_recv.set(reading.value)
+                elif reading.metric_name == "system_uptime_seconds":
+                    system_uptime_seconds.set(reading.value)
 
         snapshot_path = Path(app_config.outputs.latest_json_path)
         if snapshot_path.exists():
