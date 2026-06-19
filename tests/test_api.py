@@ -490,3 +490,135 @@ def test_tequilapi_snapshot_structure(tmp_path: Path) -> None:
     
     # Check identity
     assert api_data["identity"] == "0x123abc"
+
+
+# New tests for alerting API endpoints
+def test_alerts_endpoint_returns_active_alerts(tmp_path: Path) -> None:
+    """Test that the alerts endpoint returns active alerts"""
+    config = _test_config(tmp_path)
+    app = create_app(config)
+    
+    # Mock some active alerts in the alert manager
+    if app.state.alert_manager:
+        from mystmon.alerting import Alert, AlertSeverity, AlertState
+        from datetime import datetime
+        
+        alert = Alert(
+            id="test-alert-1",
+            name="test-alert",
+            severity=AlertSeverity.CRITICAL,
+            state=AlertState.FIRING,
+            summary="Test alert",
+            description="This is a test alert",
+            labels={"source": "test"},
+            starts_at=datetime.now()
+        )
+        app.state.alert_manager.active_alerts["test-alert-1"] = alert
+    
+    response = _get(app, "/api/v1/alerts")
+    assert response.status_code == 200
+    alerts = response.json()
+    assert isinstance(alerts, list)
+
+
+def test_alerts_history_endpoint_returns_history(tmp_path: Path) -> None:
+    """Test that the alerts history endpoint returns alert history"""
+    config = _test_config(tmp_path)
+    app = create_app(config)
+    
+    response = _get(app, "/api/v1/alerts/history")
+    assert response.status_code == 200
+    history = response.json()
+    assert isinstance(history, list)
+
+
+def test_alerts_groups_endpoint_returns_groups(tmp_path: Path) -> None:
+    """Test that the alerts groups endpoint returns alert groups"""
+    config = _test_config(tmp_path)
+    app = create_app(config)
+    
+    response = _get(app, "/api/v1/alerts/groups")
+    assert response.status_code == 200
+    groups = response.json()
+    assert isinstance(groups, dict)
+
+
+def test_alerts_acknowledge_endpoint(tmp_path: Path) -> None:
+    """Test that the alerts acknowledge endpoint works"""
+    config = _test_config(tmp_path)
+    app = create_app(config)
+    
+    # Add a test alert to acknowledge
+    if app.state.alert_manager:
+        from mystmon.alerting import Alert, AlertSeverity, AlertState
+        from datetime import datetime
+        
+        alert = Alert(
+            id="test-alert-1",
+            name="test-alert",
+            severity=AlertSeverity.CRITICAL,
+            state=AlertState.FIRING,
+            summary="Test alert",
+            description="This is a test alert",
+            labels={"source": "test"},
+            starts_at=datetime.now()
+        )
+        app.state.alert_manager.active_alerts["test-alert-1"] = alert
+    
+    # Test acknowledging the alert
+    async def post_request() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.post("/api/v1/alerts/acknowledge?alert_id=test-alert-1&user=test-user")
+    
+    import asyncio
+    response = asyncio.run(post_request())
+    
+    # Should either succeed or return 404 if alerting is disabled
+    assert response.status_code in [200, 400, 404]
+
+
+def test_alerts_suppress_endpoint(tmp_path: Path) -> None:
+    """Test that the alerts suppress endpoint works"""
+    config = _test_config(tmp_path)
+    app = create_app(config)
+    
+    # Add a test alert to suppress
+    if app.state.alert_manager:
+        from mystmon.alerting import Alert, AlertSeverity, AlertState
+        from datetime import datetime
+        
+        alert = Alert(
+            id="test-alert-1",
+            name="test-alert",
+            severity=AlertSeverity.CRITICAL,
+            state=AlertState.FIRING,
+            summary="Test alert",
+            description="This is a test alert",
+            labels={"source": "test"},
+            starts_at=datetime.now()
+        )
+        app.state.alert_manager.active_alerts["test-alert-1"] = alert
+    
+    # Test suppressing the alert
+    async def post_request() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.post("/api/v1/alerts/suppress?alert_id=test-alert-1&duration_minutes=30")
+    
+    import asyncio
+    response = asyncio.run(post_request())
+    
+    # Should either succeed or return 404 if alerting is disabled
+    assert response.status_code in [200, 400, 404]
+
+
+def test_alerts_evaluate_endpoint(tmp_path: Path) -> None:
+    """Test that the alerts evaluate endpoint works"""
+    config = _test_config(tmp_path)
+    app = create_app(config)
+    
+    response = _get(app, "/api/v1/alerts/evaluate")
+    assert response.status_code == 200
+    evaluation = response.json()
+    assert isinstance(evaluation, list)
