@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, Dict
 from enum import Enum
 
 from mystmon.config import MystMonConfig
@@ -110,6 +110,38 @@ class AlertManager:
             summary="Node has high error count",
             description="A Mysterium node has more than 10 error or warning logs",
             labels={"alert_type": "node_high_errors"}
+        ))
+        
+        # Low earnings alert
+        def node_low_earnings_condition(reading: Any) -> bool:
+            if hasattr(reading, 'source_type') and reading.source_type == 'myst':
+                if hasattr(reading, 'metric_name') and reading.metric_name == 'earnings_24h':
+                    return reading.value < 0.01 if reading.value is not None else False
+            return False
+        
+        self.alerting_rules.append(AlertingRule(
+            name="node_low_earnings",
+            condition=node_low_earnings_condition,
+            severity=AlertSeverity.WARNING,
+            summary="Node earnings are low",
+            description="A Mysterium node has earned less than 0.01 MYST in the last 24 hours",
+            labels={"alert_type": "node_low_earnings"}
+        ))
+        
+        # High restart count alert
+        def node_high_restarts_condition(reading: Any) -> bool:
+            if hasattr(reading, 'source_type') and reading.source_type == 'myst':
+                if hasattr(reading, 'metric_name') and reading.metric_name == 'restart_count':
+                    return reading.value > 5 if reading.value is not None else False
+            return False
+        
+        self.alerting_rules.append(AlertingRule(
+            name="node_high_restarts",
+            condition=node_high_restarts_condition,
+            severity=AlertSeverity.WARNING,
+            summary="Node has high restart count",
+            description="A Mysterium node has restarted more than 5 times",
+            labels={"alert_type": "node_high_restarts"}
         ))
     
     def add_rule(self, rule: AlertingRule) -> None:

@@ -1,30 +1,65 @@
-"""Mysterium node collector that integrates with MystNodes portal for authoritative node information."""
+"""Mysterium node collector for retrieving metrics from TequilAPI endpoints.
+
+This module provides functionality to collect metrics from Mysterium nodes
+running locally or on remote hosts. It handles Docker container discovery,
+TequilAPI endpoint probing, and metric collection from various endpoints.
+
+The collector supports both local Docker containers and remote hosts with
+configurable authentication and port settings.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
-import os
 import re
-import inspect
-import subprocess
-from datetime import UTC, datetime, timedelta
-from urllib.parse import urlsplit
-from typing import Any
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Set, Tuple
 
+import docker
 import httpx
 
-from mystmon.config import MystCollectorConfig, MystNodesPortalAccountConfig, MystRemoteHostConfig, TequilApiEndpointConfig
-from mystmon.collectors.mystnodes import collect_mystnodes_portal_accounts
+from mystmon.config import MystCollectorConfig, MystContainerConfig, MystRemoteHostConfig
 from mystmon.storage import Reading
 
 LOGGER = logging.getLogger(__name__)
-ERROR_PATTERN = re.compile(r"error|warn|failed|settle|auth|unlock|authentication needed", re.IGNORECASE)
-WARNING_PATTERN = re.compile(r"authentication needed|failed to sign metrics|unlock", re.IGNORECASE)
-PROMISE_PATTERN = re.compile(r"Received hermes promise|promise state updated", re.IGNORECASE)
-SESSION_PATTERN = re.compile(r"session", re.IGNORECASE)
-READ_ONLY_PATHS = {
+
+# TequilAPI endpoints that should not be called automatically
+BLOCKED_ENDPOINTS = {
+    "/stop",
+    "/auth/login",
+    "/auth/logout",
+    "/identities/{id}/register",
+    "/identities/{id}/topup",
+    "/feedback",
+    "/connection",
+    "/connection/{id}",
+    "/connection/manual",
+    "/connection/shutdown",
+    "/connection/location",
+    "/connection/proxy/location",
+    "/location",
+    "/nat/type",
+    "/config/user",
+    "/config/set",
+    "/identities/create",
+    "/identities/import",
+    "/identities/register",
+    "/services",
+    "/services/{id}",
+    "/transactor/settle",
+    "/transactor/settle/{id}",
+    "/transactor/staking",
+    "/transactor/rewards",
+    "/transactor/payments",
+    "/pilvytis/api/v1/order",
+    "/pilvytis/api/v1/payment",
+}
+
+# Endpoints that are safe to call for metrics collection
+SAFE_ENDPOINTS = {
     "/healthcheck",
     "/identities",
     "/services",
@@ -37,1815 +72,576 @@ READ_ONLY_PATHS = {
     "/node/provider/service-earnings",
     "/node/provider/sessions",
     "/node/provider/sessions-count",
+    "/node/provider/transferred-data",
     "/settle/history",
     "/transactor/chains-summary",
     "/transactor/fees",
     "/v2/transactor/fees",
     "/config",
     "/config/default",
-    "/location",
     "/connection/location",
     "/connection/proxy/location",
+    "/location",
     "/nat/type",
 }
-BLOCKED_PREFIXES = (
-    "/auth/",
-    "/stop",
-    "/feedback/",
-    "/config/user",
-    "/config/set",
-    "/identities/create",
-    "/identities/import",
-    "/identities/register",
-    "/identities/",
-    "/services/",
-    "/services",
-    "/transactor/settle/",
-    "/transactor/staking",
-    "/transactor/rewards",
-    "/transactor/payment-order",
-    "/connection/",
-    "/connection",
-)
-BLOCKED_PATHS = set(READ_ONLY_PATHS) | {
-    "/connection",
-    "/stop",
-    "/feedback",
-    "/bug-report",
-    "/auth/login",
-    "/auth/logout",
-    "/identities/create",
-    "/identities/import",
-    "/identities/register",
-    "/identities/{id}/unlock",
-    "/config/set",
-    "/config/user",
-    "/settle/withdraw",
-    "/settle/pay",
-}
+
+# Default metrics to collect if no endpoints are configured
+DEFAULT_ENDPOINTS = [
+    {"name": "healthcheck", "path": "/healthcheck", "metric_prefix": "health"},
+    {"name": "identities", "path": "/identities", "metric_prefix": "identities"},
+    {"name": "services", "path": "/services", "metric_prefix": "services"},
+    {"name": "sessions", "path": "/sessions", "metric_prefix": "sessions"},
+    {"name": "provider_quality", "path": "/node/provider/quality", "metric_prefix": "provider"},
+    {"name": "provider_earnings", "path": "/node/provider/service-earnings", "metric_prefix": "provider"},
+    {"name": "payments", "path": "/v2/transactor/fees", "metric_prefix": "payments"},
+    {"name": "location", "path": "/location", "metric_prefix": "location"},
+    {"name": "nat_type", "path": "/nat/type", "metric_prefix": "nat"},
+]
 
 
-async def collect_myst(
-    config: MystCollectorConfig,
-    timeout_seconds: int,
-    log_window_seconds: int | None = None,
-    mystnodes_accounts: list[MystNodesPortalAccountConfig] | None = None,
-) -> list[Reading]:
-    """Collect MYST node snapshots and expose them as scheduler readings.
-
-    The scheduler expects ``Reading`` objects, while the lower-level collector
-    returns per-node dictionaries. This wrapper preserves the older public
-    collector entrypoint and converts node snapshots into ``myst`` readings.
+async def collect_myst(config: MystCollectorConfig, timeout_seconds: int) -> List[Reading]:
+    """Collect metrics from Mysterium nodes.
+    
+    Args:
+        config: Collector configuration
+        timeout_seconds: Request timeout in seconds
+        
+    Returns:
+        List of readings from all nodes
     """
-    effective_log_window = log_window_seconds or getattr(config, "log_window_seconds", 21600)
-    nodes = await collect_myst_nodes_async(
-        config,
-        timeout_seconds,
-        effective_log_window,
-        mystnodes_accounts=mystnodes_accounts,
-    )
-    collected_at = datetime.now(UTC)
-    readings: list[Reading] = []
-    for node in nodes:
-        source_name = str(
-            node.get("name")
-            or node.get("container_name")
-            or node.get("portal_identity")
-            or node.get("host")
-            or "unknown"
-        )
-        labels = {
-            "container_name": str(node.get("container_name") or ""),
-            "host": str(node.get("host") or ""),
-            "status": str(node.get("status") or "unknown"),
-        }
-        readings.append(
-            Reading(
-                source_type="myst",
-                source_name=source_name,
-                metric_name="running",
-                value=1.0 if node.get("running") else 0.0,
-                labels=labels,
-                timestamp=collected_at,
-                raw_data=node,
-            )
-        )
+    readings: List[Reading] = []
+    
+    # Collect from local Docker containers
+    if config.enabled:
+        container_readings = await _collect_local_containers(config, timeout_seconds)
+        readings.extend(container_readings)
+    
+    # Collect from remote hosts
+    remote_readings = await _collect_remote_hosts(config, timeout_seconds)
+    readings.extend(remote_readings)
+    
     return readings
 
-async def collect_myst_nodes_async(
-    config: MystCollectorConfig,
-    timeout_seconds: int,
-    log_window_seconds: int,
-    mystnodes_accounts: list[MystNodesPortalAccountConfig] | None = None,
-) -> list[dict[str, Any]]:
-    """Collect MYST nodes from local Docker, remote Docker hosts, and MystNodes portal.
+
+async def _collect_local_containers(config: MystCollectorConfig, timeout_seconds: int) -> List[Reading]:
+    """Collect metrics from local Docker containers.
     
     Args:
-        config: Configuration for MYST collection
-        timeout_seconds: Timeout for collection operations
-        log_window_seconds: Time window for log analysis
+        config: Collector configuration
+        timeout_seconds: Request timeout in seconds
         
     Returns:
-        List of node information dictionaries
+        List of readings from local containers
     """
-    return await _collect_myst_nodes_async(config, timeout_seconds, log_window_seconds, mystnodes_accounts=mystnodes_accounts)
-
-
-async def _collect_myst_nodes_async(
-    config: MystCollectorConfig,
-    timeout_seconds: int,
-    log_window_seconds: int,
-    mystnodes_accounts: list[MystNodesPortalAccountConfig] | None = None,
-) -> list[dict[str, Any]]:
-    """Internal implementation of MYST node collection.
-    
-    First collects MystNodes portal accounts to get authoritative list of nodes and their local IPs,
-    then collects local and remote Docker containers, and finally probes TequilAPI using portal data.
-    
-    Args:
-        config: Configuration for MYST collection
-        timeout_seconds: Timeout for collection operations
-        log_window_seconds: Time window for log analysis
-        
-    Returns:
-        List of node information dictionaries
-    """
-    # First, collect MystNodes portal accounts to get the authoritative list of nodes and their local IPs
-    portal_nodes_data = []
-    enabled_accounts = []
-    enabled_account_indices = []
-    
-    # Track which accounts are enabled and their original indices
-    accounts = mystnodes_accounts if mystnodes_accounts is not None else getattr(config, "mystnodes_accounts", [])
-    if accounts:
-        for i, account in enumerate(accounts):
-            if account.enabled:
-                enabled_accounts.append(account)
-                enabled_account_indices.append(i)
-    
-    if enabled_accounts:
-        try:
-            portal_nodes_data = await collect_mystnodes_portal_accounts(
-                configs=enabled_accounts,
-                timeout_seconds=timeout_seconds,
-                local_nodes=None  # We'll match later
-            )
-        except Exception as exc:
-            LOGGER.error("Failed to collect MystNodes portal data: %s", exc)
-            portal_nodes_data = []
-    if portal_nodes_data is None:
-        portal_nodes_data = []
-    
-    # Flatten portal nodes data and preserve account information
-    portal_nodes = []
-    account_mapping = {}  # Map identity to account info
-    
-    # Process only enabled accounts and their results, using the correct original indices
-    for i, account_data in enumerate(portal_nodes_data):
-        # Get the original index for this enabled account
-        if i < len(enabled_account_indices):
-            original_index = enabled_account_indices[i]
-            account_config = accounts[original_index] if original_index < len(accounts) else None
-            account_info = {
-                'account': account_config.account if account_config else 'unknown',
-                'enabled': account_config.enabled if account_config else True
-            }
-        else:
-            account_info = {'account': 'unknown', 'enabled': True}
-        
-        if isinstance(account_data, list):
-            for node in account_data:
-                if isinstance(node, dict) and 'identity' in node:
-                    portal_nodes.append(node)
-                    account_mapping[node['identity']] = account_info
-        elif isinstance(account_data, dict):
-            if 'identity' in account_data:
-                portal_nodes.append(account_data)
-                account_mapping[account_data['identity']] = account_info
-            elif 'nodes' in account_data and isinstance(account_data['nodes'], list):
-                for node in account_data['nodes']:
-                    if isinstance(node, dict) and 'identity' in node:
-                        portal_nodes.append(node)
-                        account_mapping[node['identity']] = account_info
-    
-    # Create a mapping of identity to local IP and account info for TequilAPI probing
-    identity_to_local_ip = {}
-    identity_to_node_info = {}
-    identity_to_account = {}
-    
-    for node in portal_nodes:
-        if isinstance(node, dict) and 'identity' in node and 'localIp' in node:
-            identity = node['identity']
-            identity_to_local_ip[identity] = node['localIp']
-            identity_to_node_info[identity] = node
-            identity_to_account[identity] = account_mapping.get(identity, {'account': 'unknown', 'enabled': True})
-    
     try:
-        import docker
-    except ImportError:
-        LOGGER.warning("MYST Docker collection skipped reason=missing_docker_dependency")
-        remote_nodes = await _collect_remote_nodes(config, timeout_seconds, identity_to_local_ip, identity_to_node_info, identity_to_account)
-        return remote_nodes
-
-    try:
-        client = docker.DockerClient(base_url=config.docker_socket, timeout=timeout_seconds)
+        client = docker.DockerClient(base_url=config.docker_socket)
+        containers = client.containers.list(all=True)
     except Exception as exc:
-        LOGGER.warning("MYST Docker collection skipped reason=docker_unavailable error=%s", exc)
-        remote_nodes = await _collect_remote_nodes(config, timeout_seconds, identity_to_local_ip, identity_to_node_info, identity_to_account)
-        return remote_nodes
+        LOGGER.warning("Docker container listing failed reason=%s", exc)
+        return []
+    
+    readings: List[Reading] = []
+    for container in containers:
+        if not _matches_container_patterns(container.name, config.container_name_patterns):
+            continue
+            
+        container_info = _container_info(container)
+        network_info = _container_networks(container)
+        log_counts = _container_log_counts(container, config.service.log_window_seconds)
+        
+        # Add basic container metrics
+        container_readings = _container_readings(container_info, network_info, log_counts)
+        readings.extend(container_readings)
+        
+        # Probe TequilAPI if enabled
+        if config.api_probe_enabled:
+            api_readings = await _probe_container_api(container, config, timeout_seconds, container_info, network_info)
+            readings.extend(api_readings)
+    
+    return readings
 
-    try:
-        containers = [
-            container
-            for container in client.containers.list(all=True)
-            if _is_myst_container(container.name, config.container_name_patterns)
-        ]
-        local_tasks = [_container_snapshot_async(container, config, log_window_seconds, identity_to_local_ip, identity_to_node_info, identity_to_account) for container in containers]
-        local_nodes = await asyncio.gather(*local_tasks)
-        remote_nodes = await _collect_remote_nodes(config, timeout_seconds, identity_to_local_ip, identity_to_node_info, identity_to_account)
-        return list(local_nodes) + remote_nodes
-    finally:
-        client.close()
 
-
-def _is_myst_container(name: str, patterns: list[str]) -> bool:
-    """Check if a container name matches MYST container patterns.
+async def _collect_remote_hosts(config: MystCollectorConfig, timeout_seconds: int) -> List[Reading]:
+    """Collect metrics from remote hosts.
     
     Args:
-        name: Container name to check
-        patterns: List of regex patterns to match against
+        config: Collector configuration
+        timeout_seconds: Request timeout in seconds
         
     Returns:
-        True if the container name matches any pattern
+        List of readings from remote hosts
+    """
+    readings: List[Reading] = []
+    for host_config in config.remote_hosts:
+        if not host_config.enabled:
+            continue
+            
+        try:
+            host_readings = await _collect_remote_host(host_config, config, timeout_seconds)
+            readings.extend(host_readings)
+        except Exception:
+            LOGGER.exception("Remote host collection failed host=%s", host_config.host)
+    
+    return readings
+
+
+async def _collect_remote_host(
+    host_config: MystRemoteHostConfig,
+    collector_config: MystCollectorConfig,
+    timeout_seconds: int,
+) -> List[Reading]:
+    """Collect metrics from a single remote host.
+    
+    Args:
+        host_config: Remote host configuration
+        collector_config: Collector configuration
+        timeout_seconds: Request timeout in seconds
+        
+    Returns:
+        List of readings from the remote host
+    """
+    host = host_config.host
+    port = host_config.tequilapi_port or collector_config.api_default_port
+    base_url = f"http://{host}:{port}"
+    
+    # Create basic host info
+    host_info = {
+        "name": f"remote-{host}",
+        "host": host,
+        "container_name": None,
+        "running": True,
+        "status": "running",
+        "restart_count": 0,
+        "uptime_seconds": None,
+        "networks": [],
+        "log_counts": {},
+    }
+    
+    # Probe TequilAPI
+    api_readings = await _probe_api(base_url, collector_config, timeout_seconds, host_info)
+    return api_readings
+
+
+def _matches_container_patterns(name: str, patterns: List[str]) -> bool:
+    """Check if a container name matches any of the configured patterns.
+    
+    Args:
+        name: Container name
+        patterns: List of regex patterns
+        
+    Returns:
+        True if name matches any pattern
     """
     return any(re.search(pattern, name) for pattern in patterns)
 
 
-async def _container_snapshot_async(container: Any, config: MystCollectorConfig, log_window_seconds: int, 
-                                   identity_to_local_ip: dict[str, str], identity_to_node_info: dict[str, dict],
-                                   identity_to_account: dict[str, dict]) -> dict[str, Any]:
-    """Create a snapshot of a Docker container's state and TequilAPI data.
+def _container_info(container) -> Dict[str, Any]:
+    """Extract basic information from a Docker container.
     
     Args:
         container: Docker container object
-        config: Configuration for MYST collection
-        log_window_seconds: Time window for log analysis
-        identity_to_local_ip: Mapping of identity to local IP address
-        identity_to_node_info: Mapping of identity to node information
-        identity_to_account: Mapping of identity to account information
         
     Returns:
-        Dictionary containing container snapshot data
+        Dictionary with container information
     """
-    container.reload()
-    attrs = container.attrs
-    state = attrs.get("State", {})
-    network_settings = attrs.get("NetworkSettings", {})
-    networks = network_settings.get("Networks", {})
-    ports = network_settings.get("Ports") or {}
-    logs = _read_logs(container, log_window_seconds)
-    
-    # Extract identity from container
-    container_identity = _extract_identity_from_container(container.name)
-    
-    # Get account information for this identity
-    account_info = identity_to_account.get(container_identity) if container_identity else None
-    
-    # Use ONLY portal's localIp as the API host - no fallbacks per handover requirements
-    api_host = identity_to_local_ip.get(container_identity) if container_identity else None
-    
-    # If we don't have a localIp from the portal, we cannot probe the API
-    api_probe = None
-    if api_host and config.api_probe_enabled:
-        try:
-            api_probe = await _probe_api_async(api_host, container.name, ports, config, networks=networks)
-        except Exception as e:
-            LOGGER.error(f"API probe failed for node {container.name} with localIp {api_host}: {e}")
-            api_probe = {"enabled": False, "reason": f"API probe failed: {e}"}
-
-    node_name = _node_display_name(container.name, api_probe)
     return {
-        "name": node_name,
+        "name": container.name,
         "container_name": container.name,
-        "host": api_host,
-        "id": container.short_id,
-        "image": _image_name(attrs),
-        "running": state.get("Running", False),
-        "status": state.get("Status", "unknown"),
-        "restart_count": int(attrs.get("RestartCount", 0)),
-        "started_at": state.get("StartedAt"),
-        "uptime_seconds": _uptime_seconds(state.get("StartedAt")) if state.get("Running") else 0,
-        "networks": _network_summary(networks),
-        "ports": _port_summary(ports),
-        "log_counts": summarize_logs(logs),
-        "api": api_probe,
-        **_tequilapi_summary(api_probe),
-        "warnings": _warnings(logs),
-        "portal_identity": container_identity,
-        "portal_local_ip": identity_to_local_ip.get(container_identity),
-        "portal_data": identity_to_node_info.get(container_identity) if container_identity else None,
-        "portal_account": account_info['account'] if account_info else None,
-        "portal_account_enabled": account_info['enabled'] if account_info else True,
+        "host": "localhost",
+        "running": container.status == "running",
+        "status": container.status,
+        "restart_count": _extract_restart_count(container),
+        "uptime_seconds": _calculate_uptime(container),
+        "created_at": container.attrs.get("Created"),
     }
 
 
-def _extract_identity_from_container(container_name: str) -> str | None:
-    """Extract identity from container name (assuming format myst-<identity>).
+def _container_networks(container) -> List[Dict[str, Any]]:
+    """Extract network information from a Docker container.
     
     Args:
-        container_name: Name of the Docker container
+        container: Docker container object
         
     Returns:
-        Identity string or None if not found
+        List of network dictionaries
     """
-    if container_name.startswith('myst-'):
-        return container_name[5:]  # Remove 'myst-' prefix
-    return None
+    networks = []
+    network_settings = container.attrs.get("NetworkSettings", {})
+    for network_name, network_data in network_settings.get("Networks", {}).items():
+        networks.append({
+            "name": network_name,
+            "ip_address": network_data.get("IPAddress"),
+            "gateway": network_data.get("Gateway"),
+            "mac_address": network_data.get("MacAddress"),
+        })
+    return networks
 
 
-async def _collect_remote_nodes(config: MystCollectorConfig, timeout_seconds: int, 
-                               identity_to_local_ip: dict[str, str], identity_to_node_info: dict[str, dict],
-                               identity_to_account: dict[str, dict]) -> list[dict[str, Any]]:
-    """Collect MYST nodes from remote Docker hosts.
+def _container_log_counts(container, log_window_seconds: int) -> Dict[str, int]:
+    """Count log events in the recent window.
     
     Args:
-        config: Configuration for MYST collection
-        timeout_seconds: Timeout for collection operations
-        identity_to_local_ip: Mapping of identity to local IP address
-        identity_to_node_info: Mapping of identity to node information
-        identity_to_account: Mapping of identity to account information
+        container: Docker container object
+        log_window_seconds: Time window to analyze
         
     Returns:
-        List of remote node information dictionaries
+        Dictionary with log counts by type
     """
-    nodes: list[dict[str, Any]] = []
-    for host_config in config.remote_hosts:
-        if not host_config.enabled:
-            continue
-        nodes.extend(await _collect_remote_host_nodes(host_config, config, timeout_seconds, identity_to_local_ip, identity_to_node_info, identity_to_account))
-    return nodes
+    counts: Dict[str, int] = {}
+    try:
+        since = datetime.now() - timedelta(seconds=log_window_seconds)
+        logs = container.logs(since=since, stderr=True, stdout=True)
+        log_text = logs.decode("utf-8") if isinstance(logs, bytes) else str(logs)
+        counts = {
+            "error_or_warning": len(re.findall(r"\b(error|warning)\b", log_text, re.IGNORECASE)),
+            "identity_warning": log_text.count("identity") + log_text.count("Identity"),
+            "promise": log_text.count("promise") + log_text.count("Promise"),
+            "session": log_text.count("session") + log_text.count("Session"),
+        }
+    except Exception:
+        LOGGER.warning("Log analysis failed for container=%s", container.name)
+    return counts
 
 
-async def _collect_remote_host_nodes(
-    host_config: MystRemoteHostConfig,
+def _extract_restart_count(container) -> int:
+    """Extract restart count from container attributes.
+    
+    Args:
+        container: Docker container object
+        
+    Returns:
+        Restart count
+    """
+    try:
+        return int(container.attrs.get("RestartCount", 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _calculate_uptime(container) -> Optional[float]:
+    """Calculate container uptime in seconds.
+    
+    Args:
+        container: Docker container object
+        
+    Returns:
+        Uptime in seconds or None
+    """
+    try:
+        started_at = container.attrs.get("State", {}).get("StartedAt")
+        if not started_at:
+            return None
+        started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        return (datetime.now(started.tzinfo) - started).total_seconds()
+    except Exception:
+        return None
+
+
+def _container_readings(
+    container_info: Dict[str, Any],
+    network_info: List[Dict[str, Any]],
+    log_counts: Dict[str, int],
+) -> List[Reading]:
+    """Create readings from container information.
+    
+    Args:
+        container_info: Container information
+        network_info: Network information
+        log_counts: Log event counts
+        
+    Returns:
+        List of readings
+    """
+    name = container_info["name"]
+    timestamp = datetime.now()
+    readings: List[Reading] = []
+    
+    # Basic container metrics
+    readings.append(Reading(
+        source_type="myst",
+        source_name=name,
+        metric_name="running",
+        value=1.0 if container_info["running"] else 0.0,
+        labels={},
+        timestamp=timestamp,
+        raw_data=container_info,
+    ))
+    
+    readings.append(Reading(
+        source_type="myst",
+        source_name=name,
+        metric_name="restart_count",
+        value=float(container_info["restart_count"]),
+        labels={},
+        timestamp=timestamp,
+        raw_data=container_info,
+    ))
+    
+    if container_info["uptime_seconds"] is not None:
+        readings.append(Reading(
+            source_type="myst",
+            source_name=name,
+            metric_name="uptime_seconds",
+            value=float(container_info["uptime_seconds"]),
+            labels={},
+            timestamp=timestamp,
+            raw_data=container_info,
+        ))
+    
+    # Log metrics
+    for log_type, count in log_counts.items():
+        readings.append(Reading(
+            source_type="myst",
+            source_name=name,
+            metric_name=f"log_{log_type}",
+            value=float(count),
+            labels={},
+            timestamp=timestamp,
+            raw_data=container_info,
+        ))
+    
+    return readings
+
+
+async def _probe_container_api(
+    container,
     config: MystCollectorConfig,
     timeout_seconds: int,
-    identity_to_local_ip: dict[str, str],
-    identity_to_node_info: dict[str, dict],
-    identity_to_account: dict[str, dict],
-) -> list[dict[str, Any]]:
-    """Collect MYST nodes from a specific remote Docker host.
-    
-    Args:
-        host_config: Configuration for the remote host
-        config: Configuration for MYST collection
-        timeout_seconds: Timeout for collection operations
-        identity_to_local_ip: Mapping of identity to local IP address
-        identity_to_node_info: Mapping of identity to node information
-        identity_to_account: Mapping of identity to account information
-        
-    Returns:
-        List of node information dictionaries from the remote host
-    """
-    password = os.getenv(host_config.password_env) if host_config.password_env else None
-    if host_config.password_env and not password:
-        LOGGER.error(
-            "MYST collection failed host=%s reason=missing_ssh_password env=%s",
-            host_config.host,
-            host_config.password_env,
-        )
-        return [_remote_error_node(host_config.host, "missing SSH password environment variable")]
-
-    pattern = "|".join(config.container_name_patterns)
-    remote_command = (
-        "docker ps -a --format '{{.Names}}' "
-        f"| grep -Ei '{pattern}' "
-        "| while read -r c; do docker inspect \"$c\" --format '{{json .}}'; done"
-    )
-    command = [
-        "ssh",
-        "-o",
-        "StrictHostKeyChecking=accept-new",
-        "-o",
-        f"ConnectTimeout={timeout_seconds}",
-        f"{host_config.user}@{host_config.host}",
-        remote_command,
-    ]
-    env = os.environ.copy()
-    if password:
-        command = ["sshpass", "-e", *command]
-        env["SSHPASS"] = password
-
-    try:
-        completed = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            env=env,
-            text=True,
-            timeout=timeout_seconds + 5,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        LOGGER.exception(
-            "MYST collection failed host=%s reason=remote_inventory_error error=%s",
-            host_config.host,
-            exc,
-        )
-        return [_remote_error_node(host_config.host, str(exc))]
-
-    if completed.returncode != 0:
-        error = completed.stderr.strip() or "remote SSH inventory failed"
-        LOGGER.error(
-            "MYST collection failed host=%s reason=remote_inventory_nonzero returncode=%s error=%s",
-            host_config.host,
-            completed.returncode,
-            error,
-        )
-        return [_remote_error_node(host_config.host, error)]
-
-    nodes: list[dict[str, Any]] = []
-    for line in completed.stdout.splitlines():
-        if not line.strip():
-            continue
-        attrs = json.loads(line)
-        state = attrs.get("State", {})
-        networks = attrs.get("NetworkSettings", {}).get("Networks", {})
-        container_name = attrs.get("Name", "").lstrip("/")
-        
-        # Extract identity from container
-        container_identity = _extract_identity_from_container(container_name)
-        
-        # Get account information for this identity
-        account_info = identity_to_account.get(container_identity) if container_identity else None
-        
-        # Use ONLY portal's localIp as the API host - no fallbacks per handover requirements
-        api_host = identity_to_local_ip.get(container_identity) if container_identity else None
-        
-        # If we don't have a localIp from the portal, we cannot probe the API
-        api_probe = None
-        if api_host and config.api_probe_enabled:
-            try:
-                api_port = host_config.tequilapi_port or config.api_default_port
-                api_probe = await _probe_api_async(
-                    api_host,
-                    container_name,
-                    attrs.get("NetworkSettings", {}).get("Ports") or {},
-                    config,
-                    api_port,
-                    networks=networks,
-                )
-            except Exception as e:
-                LOGGER.error(f"API probe failed for node {container_name} with localIp {api_host}: {e}")
-                api_probe = {"enabled": False, "reason": f"API probe failed: {e}"}
-        
-        node_name = _node_display_name(container_name, api_probe)
-        nodes.append(
-            {
-                "name": node_name,
-                "container_name": container_name,
-                "host": api_host,
-                "inventory_host": host_config.host,
-                "id": str(attrs.get("Id", ""))[:12],
-                "image": _image_name(attrs),
-                "running": state.get("Running", False),
-                "status": state.get("Status", "unknown"),
-                "restart_count": int(attrs.get("RestartCount", 0)),
-                "started_at": state.get("StartedAt"),
-                "uptime_seconds": _uptime_seconds(state.get("StartedAt")) if state.get("Running") else 0,
-                "networks": _network_summary(networks),
-                "ports": _port_summary(attrs.get("NetworkSettings", {}).get("Ports") or {}),
-                "log_counts": {"error_or_warning": 0, "promise": 0, "session": 0, "identity_warning": 0},
-                "api": api_probe,
-                **_tequilapi_summary(api_probe),
-                "warnings": [],
-                "portal_identity": container_identity,
-                "portal_local_ip": identity_to_local_ip.get(container_identity),
-                "portal_data": identity_to_node_info.get(container_identity) if container_identity else None,
-                "portal_account": account_info['account'] if account_info else None,
-                "portal_account_enabled": account_info['enabled'] if account_info else True,
-            }
-        )
-    if not nodes:
-        LOGGER.error(
-            "MYST collection failed host=%s reason=no_remote_containers_found",
-            host_config.host,
-        )
-        return [_remote_error_node(host_config.host, "no MYST containers found")]
-    return nodes
-
-
-def _remote_error_node(host: str, reason: str) -> dict[str, Any]:
-    """Create a placeholder node for remote collection errors.
-    
-    Args:
-        host: Host that failed collection
-        reason: Reason for the failure
-        
-    Returns:
-        Dictionary representing an error node
-    """
-    return {
-        "name": f"unreachable-{host}",
-        "container_name": "",
-        "host": host,
-        "id": "",
-        "image": "",
-        "running": False,
-        "status": "unreachable",
-        "restart_count": 0,
-        "started_at": None,
-        "uptime_seconds": 0,
-        "networks": [],
-        "ports": [],
-        "log_counts": {"error_or_warning": 1, "promise": 0, "session": 0, "identity_warning": 0},
-        "api": {"enabled": False, "reason": reason},
-        "warnings": [reason],
-    }
-
-
-def summarize_logs(log_text: str) -> dict[str, int]:
-    """Summarize log text by counting different types of log entries.
-    
-    Args:
-        log_text: Text content of logs to analyze
-        
-    Returns:
-        Dictionary with counts of different log types
-    """
-    lines = log_text.splitlines()
-    return {
-        "error_or_warning": sum(1 for line in lines if ERROR_PATTERN.search(line)),
-        "promise": sum(1 for line in lines if PROMISE_PATTERN.search(line)),
-        "session": sum(1 for line in lines if SESSION_PATTERN.search(line)),
-        "identity_warning": sum(1 for line in lines if WARNING_PATTERN.search(line)),
-    }
-
-
-def _read_logs(container: Any, since_seconds: int) -> str:
-    """Read logs from a Docker container.
+    container_info: Dict[str, Any],
+    network_info: List[Dict[str, Any]],
+) -> List[Reading]:
+    """Probe TequilAPI for a container.
     
     Args:
         container: Docker container object
-        since_seconds: Time window in seconds to read logs from
+        config: Collector configuration
+        timeout_seconds: Request timeout in seconds
+        container_info: Container information
+        network_info: Network information
         
     Returns:
-        Log text content
+        List of API readings
     """
-    try:
-        since = datetime.now(UTC) - timedelta(seconds=since_seconds)
-        raw = container.logs(since=since, stdout=True, stderr=True, tail=2000)
-    except Exception as exc:
-        LOGGER.exception(
-            "MYST log read failed container=%s reason=container_logs_error error=%s",
-            getattr(container, "name", "unknown"),
-            exc,
-        )
-        return f"mystmon log read failed: {exc}"
-    return raw.decode("utf-8", errors="replace")
+    name = container_info["name"]
+    
+    # Determine API host and port
+    api_host, api_port = _determine_api_host_port(container, config, network_info)
+    if not api_host or not api_port:
+        LOGGER.debug("Could not determine API host/port for container=%s", name)
+        return []
+    
+    base_url = f"http://{api_host}:{api_port}"
+    return await _probe_api(base_url, config, timeout_seconds, container_info)
 
 
-async def _probe_api_async(
-    api_host: str,
-    container_name: str,
-    ports: dict[str, Any],
-    config: MystCollectorConfig,
-    override_port: int | None = None,
-    networks: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Probe TequilAPI endpoints for a node.
+def _determine_api_host_port(container, config: MystCollectorConfig, network_info: List[Dict[str, Any]]) -> Tuple[Optional[str], Optional[int]]:
+    """Determine the API host and port for a container.
     
     Args:
-        api_host: Host address to probe
-        container_name: Name of the container being probed
-        ports: Port mappings for the container
-        config: Configuration for MYST collection
-        override_port: Port to use instead of default
-        networks: Network information for the container
+        container: Docker container object
+        config: Collector configuration
+        network_info: Network information
         
     Returns:
-        Dictionary containing API probe results
+        Tuple of (host, port) or (None, None)
     """
-    port = override_port or config.api_default_port
-    if not port:
-        LOGGER.info("MYST API probe skipped container=%s reason=no mapped TequilAPI port found", container_name)
-        return {"enabled": False, "reason": "no mapped TequilAPI port found"}
-
-    auth = _api_auth(config)
-    base_url = f"http://{api_host}:{port}"
-
-    endpoints: dict[str, Any] = {}
-    numeric_metrics: dict[str, float] = {}
-    labels: dict[str, str] = {}
-    management_data: dict[str, Any] = {}
-
-    for endpoint in config.api_endpoints:
-        endpoint_path = _normalize_path(endpoint.path)
-        if not _is_read_only_path(endpoint_path):
-            endpoints[endpoint.name] = _endpoint_result(endpoint, endpoint_path, ok=False, reason="blocked_for_safety", supported=False)
-            continue
-
-        endpoint_result = await _fetch_api_endpoint_async(base_url, endpoint, auth, container_name, True)
-        endpoint_result["supported"] = True
-        endpoint_result["category"] = endpoint.category
-        endpoint_result["last_check"] = datetime.now(UTC).isoformat()
-        endpoints[endpoint.name] = endpoint_result
-
-        # Handle endpoint status classification for diagnostics
-        status_code = endpoint_result.get("status_code")
-        is_ok = endpoint_result.get("ok", False)
-        
-        # Classify endpoint status for diagnostics
-        if status_code == 400:
-            endpoint_result["diagnostic_status"] = "runtime_error"
-        elif status_code == 404:
-            endpoint_result["diagnostic_status"] = "not_found"
-        elif is_ok:
-            endpoint_result["diagnostic_status"] = "ok"
-        else:
-            endpoint_result["diagnostic_status"] = "error"
-
-        # Extract data from any successful read-only endpoint even when schema discovery failed.
-        if is_ok:
-            extracted = extract_api_metrics(endpoint.name, endpoint.metric_prefix, endpoint_result.get("data"))
-            numeric_metrics.update(extracted["metrics"])
-            labels.update(extracted["labels"])
-            _merge_management(management_data, endpoint.category, endpoint.name, endpoint_result.get("data"))
-
-    health = endpoints.get("healthcheck", {})
-    return {
-        "enabled": True,
-        "base_url": base_url,
-        "up": bool(health.get("ok")),
-        "status_code": health.get("status_code"),
-        "auth": auth is not None,
-        "schema_available": False,
-        "last_check": datetime.now(UTC).isoformat(),
-        "endpoints": endpoints,
-        "metrics": numeric_metrics,
-        "labels": labels,
-        "management": management_data,
-        "identity": _api_identity(endpoints, labels),
-    }
-def _normalize_path(path: str) -> str:
-    """Normalize a URL path by stripping trailing slashes.
+    # Check for explicitly configured container
+    for container_config in config.containers:
+        if container_config.name == container.name:
+            if container_config.host and container_config.tequilapi_port:
+                return container_config.host, container_config.tequilapi_port
+            if container_config.tequilapi_port:
+                return "localhost", container_config.tequilapi_port
     
-    Args:
-        path: URL path to normalize
-        
-    Returns:
-        Normalized path
-    """
-    return urlsplit(path).path.rstrip("/") or "/"
-
-
-def _path_matches(actual: str, supported: str) -> bool:
-    """Check if an actual path matches a supported path pattern.
+    # Check for expected network
+    if config.containers:
+        for container_config in config.containers:
+            if container_config.name == container.name and container_config.expected_network:
+                for network in network_info:
+                    if network["name"] == container_config.expected_network:
+                        return network["ip_address"], config.api_default_port
     
-    Args:
-        actual: Actual path to check
-        supported: Supported path pattern
-        
-    Returns:
-        True if paths match
-    """
-    actual_parts = [part for part in _normalize_path(actual).split("/") if part]
-    supported_parts = [part for part in _normalize_path(supported).split("/") if part]
-    if len(actual_parts) != len(supported_parts):
-        return False
-    for actual_part, supported_part in zip(actual_parts, supported_parts):
-        if supported_part.startswith("{") and supported_part.endswith("}"):
-            continue
-        if supported_part.startswith(":"):
-            continue
-        if actual_part != supported_part:
-            return False
-    return True
-
-
-def _is_read_only_path(path: str) -> bool:
-    """Check if a path is a read-only TequilAPI endpoint.
+    # Check for port range
+    if config.containers:
+        for container_config in config.containers:
+            if container_config.name == container.name and container_config.expected_port_range:
+                # This is a simplified implementation - in practice you'd parse the range
+                return "localhost", config.api_default_port
     
-    Args:
-        path: Path to check
-        
-    Returns:
-        True if path is read-only
-    """
-    path = _normalize_path(path)
-    if path in READ_ONLY_PATHS:
-        return True
-    if path.startswith("/services/") and re.fullmatch(r"/services/[^/]+", path):
-        return False
-    return any(path == read_only or path.startswith(f"{read_only}/") for read_only in READ_ONLY_PATHS)
-
-
-def _endpoint_result(endpoint: TequilApiEndpointConfig, path: str, ok: bool, reason: str | None, supported: bool) -> dict[str, Any]:
-    """Create a standardized result dictionary for an endpoint.
+    # Default to localhost if container is running
+    if container.status == "running":
+        return "localhost", config.api_default_port
     
-    Args:
-        endpoint: Endpoint configuration
-        path: Endpoint path
-        ok: Whether the endpoint call was successful
-        reason: Reason for failure if not ok
-        supported: Whether the endpoint is supported
-        
-    Returns:
-        Dictionary with endpoint result information
-    """
-    return {
-        "url": path,
-        "ok": ok,
-        "reason": reason,
-        "supported": supported,
-        "category": endpoint.category,
-        "last_check": datetime.now(UTC).isoformat(),
-    }
+    return None, None
 
 
-def _merge_management(management: dict[str, Any], category: str, endpoint_name: str, data: Any) -> None:
-    """Merge endpoint data into management data structure by category.
-    
-    Args:
-        management: Management data dictionary to merge into
-        category: Category to merge under
-        endpoint_name: Name of the endpoint
-        data: Data to merge
-    """
-    bucket = management.setdefault(category, {})
-    bucket[endpoint_name] = _normalize_management_value(category, endpoint_name, data)
-
-
-def _normalize_management_value(category: str, endpoint_name: str, data: Any) -> Any:
-    """Normalize management data for a specific category and endpoint.
-    
-    Args:
-        category: Data category
-        endpoint_name: Name of the endpoint
-        data: Raw data to normalize
-        
-    Returns:
-        Normalized data
-    """
-    redacted = _redact_api_value(data)
-    if category == "health" and isinstance(redacted, dict):
-        return {
-            "uptime": redacted.get("uptime"),
-            "version": redacted.get("version"),
-            "build_info": redacted.get("build_info") or redacted.get("buildInfo"),
-        }
-    if category == "identities":
-        identities = _list_from_payload(redacted, "identities") if isinstance(redacted, (dict, list)) else None
-        if identities is not None:
-            return {"count": len(identities), "identities": identities}
-    if category == "services":
-        services = _list_from_payload(redacted, "services") if isinstance(redacted, (dict, list)) else None
-        if services is None and isinstance(redacted, list):
-            services = redacted
-        if services is not None:
-            return {
-                "count": len(services),
-                "running_count": sum(1 for service in services if _truthy_service_running(service)),
-                "types": sorted({str(service.get("type")) for service in services if isinstance(service, dict) and service.get("type")}),
-            }
-    if category == "sessions":
-        if isinstance(redacted, dict):
-            return {
-                "active": redacted.get("active") or redacted.get("count"),
-                "count": redacted.get("count"),
-                "daily": redacted.get("daily") or redacted.get("stats") or redacted,
-            }
-        if isinstance(redacted, list):
-            return {"count": len(redacted)}
-    if category == "provider":
-        if isinstance(redacted, dict):
-            return {
-                "quality": redacted.get("quality"),
-                "activity": redacted.get("activity"),
-                "sessions": redacted.get("sessions"),
-                "transferred_data": redacted.get("transferredData") or redacted.get("transferred_data"),
-                "service_earnings": redacted.get("serviceEarnings") or redacted.get("service_earnings"),
-            }
-    if category in {"payments", "settlements"}:
-        return redacted
-    if category in {"config", "location", "nat"}:
-        return redacted
-    return redacted
-
-
-def _node_display_name(container_name: str, api_probe: dict[str, Any] | None) -> str:
-    """Determine the display name for a node.
-    
-    Args:
-        container_name: Name of the Docker container
-        api_probe: API probe results
-        
-    Returns:
-        Display name for the node
-    """
-    if api_probe:
-        identity = api_probe.get("identity")
-        if identity:
-            return str(identity)
-        labels = api_probe.get("labels") or {}
-        for key in ("identity_id", "provider_id", "node_id", "status_id"):
-            if labels.get(key):
-                return str(labels[key])
-    return container_name
-
-
-def _api_identity(endpoints: dict[str, Any], labels: dict[str, str]) -> str | None:
-    """Extract node identity from API endpoints and labels.
-    
-    Args:
-        endpoints: Dictionary of endpoint results
-        labels: Dictionary of label data
-        
-    Returns:
-        Identity string or None if not found
-    """
-    identity = _identity_from_endpoint(endpoints.get("identities", {}).get("data"))
-    if identity:
-        return identity
-    for key in ("identity_id", "provider_id", "node_id", "status_id"):
-        if labels.get(key):
-            return labels[key]
-    return None
-
-
-def _identity_from_endpoint(data: Any) -> str | None:
-    """Extract identity from endpoint data.
-    
-    Args:
-        data: Endpoint data to extract identity from
-        
-    Returns:
-        Identity string or None if not found
-    """
-    identities = _list_from_payload(data, "identities")
-    if not identities:
-        if isinstance(data, dict):
-            return _first_string_value(data, ("id", "identity", "provider_id", "providerId", "node_id", "nodeId"))
-        return None
-    first = identities[0]
-    if isinstance(first, dict):
-        return _first_string_value(first, ("id", "identity", "provider_id", "providerId", "node_id", "nodeId", "address"))
-    if isinstance(first, str):
-        return first
-    return None
-
-
-def _tequilapi_summary(api_probe: dict[str, Any] | None) -> dict[str, Any]:
-    """Create a summary of TequilAPI probe results.
-    
-    Args:
-        api_probe: API probe results
-        
-    Returns:
-        Dictionary with summarized API data
-    """
-    if not api_probe:
-        return {
-            "identity": None,
-            "public_ip": None,
-            "location": None,
-            "nat_type": None,
-            "services_count": None,
-            "services_running": None,
-            "service_types": None,
-            "service_quality": None,
-            "sessions_active": None,
-            "sessions_1d": None,
-            "sessions_7d": None,
-            "provider_quality": None,
-            "provider_transferred_data": None,
-            "provider_service_earnings": None,
-            "payments_balance": None,
-            "settlements_count": None,
-        }
-    management = api_probe.get("management") or {}
-    identities = _first_category_payload(management.get("identities"), ("identities",))
-    sessions_bucket = management.get("sessions") or {}
-    sessions = _first_category_payload(sessions_bucket, ("session_stats_aggregated", "sessions_stats_daily", "sessions"))
-    session_details = _first_category_payload(sessions_bucket, ("sessions",))
-    provider = _first_category_payload(management.get("provider"), ("provider_quality", "provider_activity_stats", "provider_service_earnings", "provider_sessions_1d", "provider_sessions_7d"))
-    services = _first_category_payload(management.get("services"), ("services",))
-    location = _first_location_payload(management.get("location"))
-    nat = _first_nat_payload(management.get("nat"))
-    payments = _first_category_payload(management.get("payments"), ("transactor_fees_v2", "transactor_fees"))
-    settlements = management.get("settlements") or {}
-
-    identity = api_probe.get("identity") or _first_string_value(identities if isinstance(identities, dict) else {}, ("identity", "id"))
-    public_ip = _first_string_value(location or {}, ("ip", "public_ip", "publicIp", "address"))
-    service_types = services.get("types") if isinstance(services, dict) else None
-
-    return {
-        "identity": identity,
-        "public_ip": public_ip,
-        "location": location,
-        "nat_type": _first_string_value(nat or {}, ("type", "nat_type", "natType")) if isinstance(nat, dict) else (str(nat) if nat else None),
-        "services_count": _first_number_value(services, ("count",)),
-        "services_running": _first_number_value(services, ("running_count",)),
-        "service_types": service_types,
-        "service_quality": _first_value(provider, ("service_quality", "quality")),
-        "sessions_active": _session_active_value(session_details) or _session_active_value(sessions),
-        "sessions_1d": _extract_bucket_value(sessions, "1d") or _provider_range_value(provider, "1d"),
-        "sessions_7d": _extract_bucket_value(sessions, "7d") or _provider_range_value(provider, "7d"),
-        "provider_quality": _first_number_value(provider, ("quality",)),
-        "provider_transferred_data": _first_number_value(provider, ("transferred_data",)),
-        "provider_service_earnings": _first_number_value(provider, ("service_earnings",)),
-        "payments_balance": _first_number_value(payments, ("balance",)),
-        "settlements_count": _collection_count(settlements),
-    }
-
-
-def _first_location_payload(value: Any) -> dict[str, Any] | None:
-    """Extract the first location payload from nested data.
-    
-    Args:
-        value: Data to extract location from
-        
-    Returns:
-        Location data dictionary or None
-    """
-    if isinstance(value, dict):
-        for key in ("location", "connection_location", "connection_proxy_location"):
-            nested = value.get(key)
-            if isinstance(nested, dict):
-                return nested
-        return value
-    if isinstance(value, list):
-        for item in value:
-            if isinstance(item, dict):
-                return _first_location_payload(item)
-    return None
-
-
-def _first_category_payload(value: Any, preferred_keys: tuple[str, ...]) -> dict[str, Any] | None:
-    """Extract the first payload from a category with preferred key ordering.
-    
-    Args:
-        value: Data to extract from
-        preferred_keys: Preferred keys to look for first
-        
-    Returns:
-        Payload data dictionary or None
-    """
-    if isinstance(value, dict):
-        for key in preferred_keys:
-            nested = value.get(key)
-            if isinstance(nested, dict):
-                return nested
-        for nested in value.values():
-            if isinstance(nested, dict):
-                return nested
-    if isinstance(value, list):
-        for item in value:
-            if isinstance(item, dict):
-                return _first_category_payload(item, preferred_keys)
-    return None
-
-
-def _first_nat_payload(value: Any) -> dict[str, Any] | None:
-    """Extract the first NAT payload from nested data.
-    
-    Args:
-        value: Data to extract NAT information from
-        
-    Returns:
-        NAT data dictionary or None
-    """
-    if isinstance(value, dict):
-        for key in ("nat_type", "natType", "type"):
-            nested = value.get(key)
-            if isinstance(nested, dict):
-                return nested
-        return value
-    if isinstance(value, list):
-        for item in value:
-            if isinstance(item, dict):
-                return _first_nat_payload(item)
-    return None
-
-
-def _first_dict_value(value: Any) -> dict[str, Any] | None:
-    """Extract the first dictionary value from data.
-    
-    Args:
-        value: Data to extract dictionary from
-        
-    Returns:
-        First dictionary found or None
-    """
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, list):
-        for item in value:
-            if isinstance(item, dict):
-                return item
-    return None
-
-
-def _first_value(data: dict[str, Any] | None, keys: tuple[str, ...]) -> Any:
-    """Extract the first value for specified keys from data.
-    
-    Args:
-        data: Data dictionary to extract from
-        keys: Keys to look for
-        
-    Returns:
-        First value found or None
-    """
-    if not isinstance(data, dict):
-        return None
-    for key in keys:
-        if key in data:
-            return data.get(key)
-    return None
-
-
-def _first_number_value(data: Any, keys: tuple[str, ...]) -> float | None:
-    """Extract the first numeric value for specified keys from data.
-    
-    Args:
-        data: Data to extract from
-        keys: Keys to look for
-        
-    Returns:
-        First numeric value found or None
-    """
-    if not isinstance(data, dict):
-        return _first_numeric(data)
-    for key in keys:
-        numeric = _first_numeric(data.get(key))
-        if numeric is not None:
-            return numeric
-    return None
-
-
-def _collection_count(value: Any) -> float | None:
-    """Get a count from collection data.
-    
-    Args:
-        value: Data to count
-        
-    Returns:
-        Count as float or None
-    """
-    if isinstance(value, dict):
-        for key in ("count", "total", "length", "size"):
-            numeric = _first_numeric(value.get(key))
-            if numeric is not None:
-                return numeric
-        return float(len(value))
-    if isinstance(value, list):
-        return float(len(value))
-    return _first_numeric(value)
-
-
-def _first_numeric(value: Any) -> float | None:
-    """Extract the first numeric value from data.
-    
-    Args:
-        value: Data to extract numeric value from
-        
-    Returns:
-        Numeric value as float or None
-    """
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, dict):
-        for item in value.values():
-            numeric = _first_numeric(item)
-            if numeric is not None:
-                return numeric
-    if isinstance(value, list):
-        for item in value:
-            numeric = _first_numeric(item)
-            if numeric is not None:
-                return numeric
-    return None
-
-
-def _extract_bucket_value(data: Any, bucket: str) -> float | None:
-    """Extract a value from a time bucket in data.
-    
-    Args:
-        data: Data to extract from
-        bucket: Time bucket name (e.g., "1d", "7d")
-        
-    Returns:
-        Bucket value as float or None
-    """
-    if not isinstance(data, dict):
-        return None
-    for key in (
-        bucket,
-        f"stats_{bucket}",
-        f"stats{bucket}",
-        f"{bucket}_count",
-        f"{bucket}Count",
-        "daily",
-    ):
-        numeric = _first_numeric(data.get(key))
-        if numeric is not None:
-            return numeric
-    return None
-
-
-def _provider_range_value(provider: Any, bucket: str) -> float | None:
-    """Extract a range value from provider data.
-    
-    Args:
-        provider: Provider data to extract from
-        bucket: Time bucket name (e.g., "1d", "7d")
-        
-    Returns:
-        Range value as float or None
-    """
-    if not isinstance(provider, dict):
-        return None
-    for key in ("sessions", "activity", "transferred_data", "service_earnings"):
-        value = provider.get(key)
-        if isinstance(value, dict):
-            numeric = _extract_bucket_value(value, bucket)
-            if numeric is not None:
-                return numeric
-    return None
-
-
-def _session_active_value(sessions: Any) -> float | None:
-    """Extract active session count from sessions data.
-    
-    Args:
-        sessions: Sessions data to extract from
-        
-    Returns:
-        Active session count as float or None
-    """
-    if not isinstance(sessions, dict):
-        return None
-    for key in ("active", "count"):
-        numeric = _first_numeric(sessions.get(key))
-        if numeric is not None:
-            return numeric
-    daily = sessions.get("daily")
-    if isinstance(daily, dict):
-        for key in ("count", "active", "sessions"):
-            numeric = _first_numeric(daily.get(key))
-            if numeric is not None:
-                return numeric
-    return None
-
-
-def _first_string_value(data: dict[str, Any], keys: tuple[str, ...]) -> str | None:
-    """Extract the first string value for specified keys from data.
-    
-    Args:
-        data: Data dictionary to extract from
-        keys: Keys to look for
-        
-    Returns:
-        First string value found or None
-    """
-    for key in keys:
-        value = data.get(key)
-        if value is not None and not isinstance(value, (dict, list)):
-            return str(value)
-    return None
-
-
-async def _fetch_api_endpoint_async(
+async def _probe_api(
     base_url: str,
-    endpoint: TequilApiEndpointConfig,
-    auth: tuple[str, str] | None,
-    container_name: str,
-    is_supported: bool = True,
-) -> dict[str, Any]:
-    """Fetch data from a specific TequilAPI endpoint.
+    config: MystCollectorConfig,
+    timeout_seconds: int,
+    host_info: Dict[str, Any],
+) -> List[Reading]:
+    """Probe TequilAPI endpoints.
     
     Args:
         base_url: Base URL for the API
-        endpoint: Endpoint configuration
-        auth: Authentication credentials
-        container_name: Name of the container being probed
-        is_supported: Whether the endpoint is supported
+        config: Collector configuration
+        timeout_seconds: Request timeout in seconds
+        host_info: Host information
         
     Returns:
-        Dictionary with endpoint response data
+        List of API readings
     """
-    # Only allow GET requests for safety
-    if endpoint.method.upper() != "GET":
-        return {
-            "url": f"{base_url}{endpoint.path}",
-            "ok": False,
-            "reason": "method_not_allowed_for_safety",
-            "supported": is_supported,
-            "category": endpoint.category,
-            "last_check": datetime.now(UTC).isoformat(),
-        }
+    name = host_info["name"]
+    timestamp = datetime.now()
+    readings: List[Reading] = []
     
-    url = f"{base_url}{endpoint.path}"
-    LOGGER.info("MYST API call container=%s endpoint=%s url=%s", container_name, endpoint.name, url)
+    # Check if API is accessible
     try:
-        async with httpx.AsyncClient() as client:
-            response = client.get(url, timeout=3, auth=auth)
-            if inspect.isawaitable(response):
-                response = await response
-            if response.status_code in {401, 403, 404, 405}:
-                result = {
-                    "url": url,
-                    "status_code": response.status_code,
-                    "ok": False,
-                    "reason": _api_reason(response.status_code),
-                    "supported": is_supported,
-                    "category": endpoint.category,
-                    "last_check": datetime.now(UTC).isoformat(),
-                }
-                _log_api_result(container_name, endpoint.name, result)
-                return result
+        async with httpx.AsyncClient(base_url=base_url, timeout=timeout_seconds) as client:
+            response = await client.get("/healthcheck")
+            api_up = response.status_code == 200
+    except Exception:
+        api_up = False
+    
+    readings.append(Reading(
+        source_type="myst",
+        source_name=name,
+        metric_name="api_up",
+        value=1.0 if api_up else 0.0,
+        labels={},
+        timestamp=timestamp,
+        raw_data=host_info,
+    ))
+    
+    if not api_up:
+        return readings
+    
+    # Collect metrics from configured endpoints
+    endpoints = config.api_endpoints or _create_default_endpoints()
+    for endpoint_config in endpoints:
+        if endpoint_config.path in BLOCKED_ENDPOINTS:
+            continue
+            
+        try:
+            endpoint_readings = await _fetch_api_endpoint(
+                base_url, config, timeout_seconds, endpoint_config, name, timestamp, host_info
+            )
+            readings.extend(endpoint_readings)
+        except Exception:
+            LOGGER.warning(
+                "API endpoint collection failed name=%s endpoint=%s path=%s",
+                name,
+                endpoint_config.name,
+                endpoint_config.path,
+            )
+    
+    return readings
+
+
+def _create_default_endpoints():
+    """Create default endpoint configurations."""
+    from mystmon.config import TequilApiEndpointConfig
+    return [TequilApiEndpointConfig(**endpoint) for endpoint in DEFAULT_ENDPOINTS]
+
+
+async def _fetch_api_endpoint(
+    base_url: str,
+    config: MystCollectorConfig,
+    timeout_seconds: int,
+    endpoint_config,
+    source_name: str,
+    timestamp: datetime,
+    host_info: Dict[str, Any],
+) -> List[Reading]:
+    """Fetch data from a single API endpoint.
+    
+    Args:
+        base_url: Base URL for the API
+        config: Collector configuration
+        timeout_seconds: Request timeout in seconds
+        endpoint_config: Endpoint configuration
+        source_name: Source name for readings
+        timestamp: Timestamp for readings
+        host_info: Host information
+        
+    Returns:
+        List of readings from the endpoint
+    """
+    path = endpoint_config.path
+    readings: List[Reading] = []
+    
+    try:
+        headers = {}
+        if config.api_username and config.api_password_env:
+            import os
+            password = os.getenv(config.api_password_env)
+            if password:
+                auth_string = f"{config.api_username}:{password}"
+                auth_bytes = auth_string.encode("utf-8")
+                auth_b64 = base64.b64encode(auth_bytes).decode("utf-8")
+                headers["Authorization"] = f"Basic {auth_b64}"
+        
+        async with httpx.AsyncClient(base_url=base_url, timeout=timeout_seconds, headers=headers) as client:
+            response = await client.get(path)
             response.raise_for_status()
-            result = {
-                "url": url,
-                "status_code": response.status_code,
-                "ok": True,
-                "data": _decode_response(response),
-                "supported": is_supported,
-                "category": endpoint.category,
-                "last_check": datetime.now(UTC).isoformat(),
-            }
-            _log_api_result(container_name, endpoint.name, result)
-            return result
-    except httpx.HTTPError as exc:
-        result = {
-            "url": url,
-            "ok": False,
-            "error": str(exc),
-            "supported": is_supported,
-            "category": endpoint.category,
-            "last_check": datetime.now(UTC).isoformat(),
-        }
-        LOGGER.error(
-            "MYST API call failed container=%s endpoint=%s url=%s reason=http_error error=%s",
-            container_name,
-            endpoint.name,
-            url,
+            data = response.json()
+    except Exception as exc:
+        LOGGER.warning(
+            "API endpoint request failed name=%s endpoint=%s path=%s error=%s",
+            source_name,
+            endpoint_config.name,
+            path,
             exc,
         )
-        _log_api_result(container_name, endpoint.name, result)
-        return result
+        return []
+    
+    # Extract metrics from response
+    metrics = _extract_metrics_from_response(data, endpoint_config.metric_prefix)
+    for metric_name, value in metrics.items():
+        readings.append(Reading(
+            source_type="myst",
+            source_name=source_name,
+            metric_name=metric_name,
+            value=value,
+            labels={},
+            timestamp=timestamp,
+            raw_data=host_info,
+        ))
+    
+    return readings
 
 
-def _log_api_result(container_name: str, endpoint_name: str, result: dict[str, Any]) -> None:
-    """Log API result information.
+def _extract_metrics_from_response(data: Any, prefix: str) -> Dict[str, float]:
+    """Extract numeric metrics from API response data.
     
     Args:
-        container_name: Name of the container
-        endpoint_name: Name of the endpoint
-        result: API result data to log
-    """
-    log_payload = {
-        "ok": result.get("ok"),
-        "status_code": result.get("status_code"),
-        "reason": result.get("reason"),
-        "error": result.get("error"),
-        "data": _redact_api_value(result.get("data")),
-    }
-    LOGGER.info(
-        "MYST API result container=%s endpoint=%s result=%s",
-        container_name,
-        endpoint_name,
-        json.dumps(log_payload, sort_keys=True, default=str),
-    )
-
-
-def _redact_api_value(value: Any, max_chars: int = 2000) -> Any:
-    """Redact sensitive information from API values.
-    
-    Args:
-        value: Value to redact
-        max_chars: Maximum characters to keep in non-sensitive strings
+        data: Response data
+        prefix: Metric name prefix
         
     Returns:
-        Redacted value
+        Dictionary of metric names and values
     """
-    if isinstance(value, dict):
-        redacted: dict[str, Any] = {}
-        for key, item in value.items():
-            key_name = str(key)
-            if not _is_log_safe_key(key_name):
-                redacted[key_name] = "***REDACTED***"
-            else:
-                redacted[key_name] = _redact_api_value(item, max_chars)
-        return redacted
-    if isinstance(value, list):
-        return [_redact_api_value(item, max_chars) for item in value[:20]]
-    if isinstance(value, str):
-        # Redact sensitive data patterns
-        if re.search(r"\b0x[a-fA-F0-9]{40}\b", value):
-            return False
-        sensitive_patterns = [
-            r"(?<!0x)[a-zA-Z0-9]{32,}",  # Long alphanumeric strings
-            r"password|secret|token|private|key|mnemonic|wallet|hash",  # Keywords
-        ]
-        
-        lower_value = value.lower()
-        for pattern in sensitive_patterns:
-            if re.search(pattern, lower_value):
-                return "***REDACTED***"
-        return value if len(value) <= max_chars else f"{value[:max_chars]}...<truncated>"
-    return value
-
-
-def _contains_sensitive_data(value: str) -> bool:
-    """Check if a string contains sensitive data that should be redacted.
+    metrics: Dict[str, float] = {}
     
-    Args:
-        value: String to check
-        
-    Returns:
-        True if string contains sensitive data
-    """
-    if re.search(r"\b0x[a-fA-F0-9]{40}\b", value):
-        return False
-    sensitive_patterns = [
-        r"(?<!0x)[a-zA-Z0-9]{32,}",  # Long alphanumeric strings
-        r"password|secret|token|private|key|mnemonic|wallet|hash",  # Keywords
-    ]
+    def _extract(obj: Any, path: str = "") -> None:
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                new_path = f"{path}_{key}" if path else key
+                _extract(value, new_path)
+        elif isinstance(obj, list):
+            for i, item in enumerate(obj):
+                new_path = f"{path}_{i}" if path else str(i)
+                _extract(item, new_path)
+        elif isinstance(obj, (int, float)) and not isinstance(obj, bool):
+            metric_name = f"{prefix}_{path}" if prefix and path else (prefix or path)
+            metrics[metric_name] = float(obj)
+        elif obj is True:
+            metric_name = f"{prefix}_{path}" if prefix and path else (prefix or path)
+            metrics[metric_name] = 1.0
+        elif obj is False:
+            metric_name = f"{prefix}_{path}" if prefix and path else (prefix or path)
+            metrics[metric_name] = 0.0
     
-    lower_value = value.lower()
-    for pattern in sensitive_patterns:
-        if re.search(pattern, lower_value):
-            return True
-    return False
-
-
-def _is_log_safe_key(key: str) -> bool:
-    """Check if a key is safe to log (doesn't contain sensitive information).
-    
-    Args:
-        key: Key to check
-        
-    Returns:
-        True if key is safe to log
-    """
-    lowered = key.lower()
-    blocked = ("password", "secret", "token", "private", "key", "mnemonic", "email", "wallet", "hash", "address")
-    return not any(item in lowered for item in blocked)
-
-
-def _api_auth(config: MystCollectorConfig) -> tuple[str, str] | None:
-    """Get API authentication credentials from configuration.
-    
-    Args:
-        config: Configuration containing authentication settings
-        
-    Returns:
-        Tuple of (username, password) or None if not configured
-    """
-    if not config.api_username or not config.api_password_env:
-        return None
-    password = os.getenv(config.api_password_env)
-    if not password:
-        return None
-    return (config.api_username, password)
-
-
-def _api_reason(status_code: int) -> str:
-    """Get a human-readable reason for an API status code.
-    
-    Args:
-        status_code: HTTP status code
-        
-    Returns:
-        Human-readable reason string
-    """
-    return {
-        401: "unauthorized",
-        403: "forbidden",
-        404: "not found",
-        405: "method not allowed",
-    }.get(status_code, "unavailable")
-
-
-def _decode_response(response: httpx.Response) -> Any:
-    """Decode an HTTP response.
-    
-    Args:
-        response: HTTP response to decode
-        
-    Returns:
-        Decoded response data
-    """
-    content_type = getattr(response, "headers", {}).get("content-type", "")
-    if "json" in content_type.lower():
-        return response.json()
-    try:
-        return response.json()
-    except ValueError:
-        return response.text
-
-
-def extract_api_metrics(endpoint_name: str, metric_prefix: str, data: Any) -> dict[str, dict[str, float | str]]:
-    """Extract metrics from API endpoint data.
-    
-    Args:
-        endpoint_name: Name of the endpoint
-        metric_prefix: Prefix for metric names
-        data: Data to extract metrics from
-        
-    Returns:
-        Dictionary with metrics and labels
-    """
-    metrics: dict[str, float] = {}
-    labels: dict[str, str] = {}
-
-    if endpoint_name == "healthcheck" and isinstance(data, dict):
-        metrics[f"{metric_prefix}_up"] = 1
-        metrics[f"{metric_prefix}_uptime_seconds"] = float(_parse_go_duration(data.get("uptime", "")))
-        if isinstance(data.get("process"), (int, float)):
-            metrics[f"{metric_prefix}_process"] = float(data["process"])
-        _add_label(labels, f"{metric_prefix}_version", data.get("version"))
-        build_info = data.get("build_info") or data.get("buildInfo") or {}
-        if isinstance(build_info, dict):
-            _add_label(labels, f"{metric_prefix}_build_commit", build_info.get("commit"))
-            _add_label(labels, f"{metric_prefix}_build_branch", build_info.get("branch"))
-            _add_label(labels, f"{metric_prefix}_build_number", build_info.get("build_number") or build_info.get("buildNumber"))
-        return {"metrics": metrics, "labels": labels}
-
-    if endpoint_name == "identities":
-        identities = _list_from_payload(data, "identities")
-        if identities is not None:
-            metrics[f"{metric_prefix}_count"] = float(len(identities))
-        return {"metrics": metrics, "labels": labels}
-
-    if endpoint_name == "services":
-        services = _list_from_payload(data, "services")
-        if services is not None:
-            metrics[f"{metric_prefix}_count"] = float(len(services))
-            metrics[f"{metric_prefix}_running_count"] = float(sum(1 for service in services if _truthy_service_running(service)))
-        return {"metrics": metrics, "labels": labels}
-
-    if endpoint_name in ["sessions", "session_stats_aggregated"]:
-        # Extract session metrics
-        if isinstance(data, dict):
-            for key, value in data.items():
-                if isinstance(value, (int, float)):
-                    metrics[f"{metric_prefix}_{key}"] = float(value)
-        elif isinstance(data, list):
-            metrics[f"{metric_prefix}_count"] = float(len(data))
-        return {"metrics": metrics, "labels": labels}
-
-    if endpoint_name in ["provider_stats", "provider_sessions_1d", "provider_sessions_7d"]:
-        # Extract provider metrics
-        if isinstance(data, dict):
-            for key, value in data.items():
-                if isinstance(value, (int, float)):
-                    metrics[f"{metric_prefix}_{key}"] = float(value)
-                elif isinstance(value, str):
-                    _add_label(labels, f"{metric_prefix}_{key}", value)
-        return {"metrics": metrics, "labels": labels}
-
-    if endpoint_name in ["payments_balance", "settlement_history"]:
-        # Extract payment/settlement metrics
-        if isinstance(data, dict):
-            for key, value in data.items():
-                if isinstance(value, (int, float)):
-                    metrics[f"{metric_prefix}_{key}"] = float(value)
-        return {"metrics": metrics, "labels": labels}
-
-    if endpoint_name in ["location", "nat_type"]:
-        # Extract location/NAT info as labels
-        if isinstance(data, dict):
-            for key, value in data.items():
-                if not isinstance(value, (dict, list)):
-                    _add_label(labels, f"{metric_prefix}_{key}", value)
-        elif isinstance(data, str):
-            _add_label(labels, metric_prefix, data)
-        return {"metrics": metrics, "labels": labels}
-
-    # Generic flattening for other endpoints
-    flattened = _flatten_numeric(data)
-    for key, value in flattened.items():
-        metrics[f"{metric_prefix}_{key}"] = value
-    if isinstance(data, dict):
-        for key in ("type", "ip", "country", "status", "state"):
-            _add_label(labels, f"{metric_prefix}_{key}", data.get(key))
-
-    return {"metrics": metrics, "labels": labels}
-
-
-def _parse_go_duration(value: str) -> int:
-    """Parse a Go duration string into seconds.
-    
-    Args:
-        value: Go duration string (e.g., "1h30m45s")
-        
-    Returns:
-        Duration in seconds
-    """
-    if not value:
-        return 0
-    total = 0.0
-    for amount, unit in re.findall(r"(\d+(?:\.\d+)?)(ns|µs|us|ms|h|m|s)", value):
-        number = float(amount)
-        if unit == "h":
-            total += number * 3600
-        elif unit == "m":
-            total += number * 60
-        elif unit == "s":
-            total += number
-        elif unit == "ms":
-            total += number / 1000
-        elif unit in {"us", "µs"}:
-            total += number / 1_000_000
-        elif unit == "ns":
-            total += number / 1_000_000_000
-    return int(total)
-
-
-def _list_from_payload(data: Any, key: str) -> list[Any] | None:
-    """Extract a list from payload data.
-    
-    Args:
-        data: Data to extract from
-        key: Key to look for the list under
-        
-    Returns:
-        List or None if not found
-    """
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict) and isinstance(data.get(key), list):
-        return data[key]
-    return None
-
-
-def _truthy_service_running(service: Any) -> bool:
-    """Check if a service is running based on its data.
-    
-    Args:
-        service: Service data to check
-        
-    Returns:
-        True if service is running
-    """
-    if not isinstance(service, dict):
-        return False
-    for key in ("running", "enabled", "active"):
-        if isinstance(service.get(key), bool):
-            return service[key]
-    status = service.get("status") or service.get("state")
-    return str(status).lower() in {"running", "active", "started", "up"}
-
-
-def _flatten_numeric(data: Any, prefix: str = "") -> dict[str, float]:
-    """Flatten nested data structure into numeric metrics.
-    
-    Args:
-        data: Data to flatten
-        prefix: Prefix for metric names
-        
-    Returns:
-        Dictionary of flattened numeric metrics
-    """
-    metrics: dict[str, float] = {}
-    if isinstance(data, dict):
-        for key, value in data.items():
-            name = _metric_key(prefix, key)
-            metrics.update(_flatten_numeric(value, name))
-    elif isinstance(data, list):
-        metrics[_metric_key(prefix, "count")] = float(len(data))
-        for index, value in enumerate(data[:10]):
-            metrics.update(_flatten_numeric(value, _metric_key(prefix, str(index))))
-    elif isinstance(data, bool):
-        metrics[prefix] = 1.0 if data else 0.0
-    elif isinstance(data, (int, float)):
-        metrics[prefix] = float(data)
-    return {key: value for key, value in metrics.items() if key}
-
-
-def _metric_key(prefix: str, key: str) -> str:
-    """Create a standardized metric key name.
-    
-    Args:
-        prefix: Prefix for the key
-        key: Base key name
-        
-    Returns:
-        Standardized metric key
-    """
-    raw = f"{prefix}_{key}" if prefix else str(key)
-    return re.sub(r"[^a-zA-Z0-9_]", "_", raw).strip("_").lower()
-
-
-def _add_label(labels: dict[str, str], key: str, value: Any) -> None:
-    """Add a label to the labels dictionary after redacting sensitive data.
-    
-    Args:
-        labels: Dictionary to add label to
-        key: Label key
-        value: Label value
-    """
-    if value is None or isinstance(value, (dict, list)):
-        return
-    # Redact sensitive label values
-    str_value = str(value)
-    if _contains_sensitive_data(str_value):
-        str_value = "***REDACTED***"
-    labels[_metric_key("", key)] = str_value
-
-
-def _configured_api_port(container_name: str, config: MystCollectorConfig, networks: dict[str, Any] | None = None) -> int | None:
-    """Get the configured API port for a container.
-    
-    Args:
-        container_name: Name of the container
-        config: Configuration containing container settings
-        networks: Network information for the container
-        
-    Returns:
-        Configured port number or None
-    """
-    for item in config.containers:
-        if _matches_configured_container(item.name, item.expected_network, container_name, networks):
-            return item.tequilapi_port
-    return None
-
-
-def _configured_api_host(container_name: str, config: MystCollectorConfig, networks: dict[str, Any] | None = None) -> str | None:
-    """Get the configured API host for a container.
-    
-    Args:
-        container_name: Name of the container
-        config: Configuration containing container settings
-        networks: Network information for the container
-        
-    Returns:
-        Configured host address or None
-    """
-    for item in config.containers:
-        if _matches_configured_container(item.name, item.expected_network, container_name, networks):
-            return item.host
-    return None
-
-
-def _matches_configured_container(
-    configured_name: str,
-    expected_network: str | None,
-    container_name: str,
-    networks: dict[str, Any] | None = None,
-) -> bool:
-    """Check if a container matches configured settings.
-    
-    Args:
-        configured_name: Configured container name
-        expected_network: Expected network name
-        container_name: Actual container name
-        networks: Network information
-        
-    Returns:
-        True if container matches configuration
-    """
-    if configured_name != container_name:
-        return False
-    if not expected_network:
-        return True
-    return expected_network in (networks or {})
-
-
-def _network_api_host(networks: dict[str, Any]) -> str | None:
-    """Get API host from network information.
-    
-    Args:
-        networks: Network information
-        
-    Returns:
-        Host IP address or None
-    """
-    preferred_prefixes = ("ipvlan", "vlan")
-    for prefix in preferred_prefixes:
-        for name, details in networks.items():
-            if not name.lower().startswith(prefix):
-                continue
-            ip_address = str(details.get("IPAddress", "")).strip()
-            if ip_address:
-                return ip_address
-    for details in networks.values():
-        ip_address = str(details.get("IPAddress", "")).strip()
-        if ip_address:
-            return ip_address
-    return None
-
-
-def _mapped_api_port(ports: dict[str, Any], api_default_port: int) -> int | None:
-    """Get mapped API port from port mappings.
-    
-    Args:
-        ports: Port mappings
-        api_default_port: Default API port
-        
-    Returns:
-        Mapped port number or None
-    """
-    for container_port, mappings in ports.items():
-        if not container_port.startswith(f"{api_default_port}/") or not mappings:
-            continue
-        return int(mappings[0]["HostPort"])
-    return None
-
-
-def _image_name(attrs: dict[str, Any]) -> str:
-    """Get the image name from container attributes.
-    
-    Args:
-        attrs: Container attributes
-        
-    Returns:
-        Image name
-    """
-    tags = attrs.get("Config", {}).get("Image")
-    return str(tags or attrs.get("Image", "unknown"))
-
-
-def _network_summary(networks: dict[str, Any]) -> list[dict[str, str]]:
-    """Create a summary of network information.
-    
-    Args:
-        networks: Network information
-        
-    Returns:
-        List of network summary dictionaries
-    """
-    return [
-        {
-            "name": name,
-            "ip_address": str(details.get("IPAddress", "")),
-            "gateway": str(details.get("Gateway", "")),
-            "mac_address": str(details.get("MacAddress", "")),
-        }
-        for name, details in networks.items()
-    ]
-
-
-def _port_summary(ports: dict[str, Any]) -> list[dict[str, str]]:
-    """Create a summary of port mappings.
-    
-    Args:
-        ports: Port mappings
-        
-    Returns:
-        List of port summary dictionaries
-    """
-    summary: list[dict[str, str]] = []
-    for container_port, mappings in ports.items():
-        if not mappings:
-            summary.append({"container_port": container_port, "host_ip": "", "host_port": ""})
-            continue
-        for mapping in mappings:
-            summary.append(
-                {
-                    "container_port": container_port,
-                    "host_ip": str(mapping.get("HostIp", "")),
-                    "host_port": str(mapping.get("HostPort", "")),
-                }
-            )
-    return summary
-
-
-def _uptime_seconds(started_at: str | None) -> int:
-    """Calculate uptime in seconds from start time.
-    
-    Args:
-        started_at: ISO format start time string
-        
-    Returns:
-        Uptime in seconds
-    """
-    if not started_at:
-        return 0
-    normalized = started_at.replace("Z", "+00:00")
-    try:
-        started = datetime.fromisoformat(normalized)
-    except ValueError:
-        return 0
-    return max(0, int((datetime.now(UTC) - started).total_seconds()))
-
-
-def _warnings(log_text: str) -> list[str]:
-    """Extract warnings from log text.
-    
-    Args:
-        log_text: Log text to analyze
-        
-    Returns:
-        List of warning messages
-    """
-    findings = []
-    if re.search(r"authentication needed: password or unlock", log_text, re.IGNORECASE):
-        findings.append("authentication needed: password or unlock")
-    if re.search(r"failed to sign metrics", log_text, re.IGNORECASE):
-        findings.append("failed to sign metrics")
-    return findings
-
-
-collect_myst_nodes = collect_myst_nodes_async
+    _extract(data)
+    return metrics
