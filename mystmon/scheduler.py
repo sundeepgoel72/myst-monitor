@@ -1,321 +1,269 @@
+"""Scheduler for MystMon data collection.
+
+This module coordinates the periodic collection of metrics from various sources
+including Docker containers, Prometheus endpoints, SNMP targets, and Mysterium
+node TequilAPI endpoints. It manages the collection cycle timing and ensures
+data is properly stored in both reading storage and history database.
+"""
+
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 import time
 from datetime import UTC, datetime
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING
 
-from mystmon.collectors.myst import collect_myst_nodes_async
+from mystmon.collectors.myst import collect_myst
 from mystmon.collectors.mystnodes import collect_mystnodes_portal_accounts
 from mystmon.collectors.prometheus import collect_prometheus
 from mystmon.collectors.snmp import collect_snmp
-from mystmon.config import MystMonConfig
-from mystmon.history import HistoryStore
-from mystmon.snapshot import build_snapshot, write_snapshot
-from mystmon.storage import Reading, ReadingStore
-from mystmon.telegram import TelegramNotifier, next_report_delay
+from mystmon.snapshot import render_snmp_extend
+
+if TYPE_CHECKING:
+    from mystmon.config import MystMonConfig
+    from mystmon.history import HistoryStore
+    from mystmon.storage import ReadingStore
+    from mystmon.telegram import TelegramNotifier
 
 LOGGER = logging.getLogger(__name__)
 
 
 class CollectorScheduler:
-    """Scheduler for collecting metrics from various sources at regular intervals."""
+    """Scheduler for periodic data collection.
+    
+    Coordinates collection cycles from all configured sources and manages
+    the storage of collected data in both reading storage and history.
+    """
     
     def __init__(
         self,
         config: MystMonConfig,
         store: ReadingStore,
-        history: HistoryStore | None = None,
-        telegram: TelegramNotifier | None = None,
+        history: HistoryStore | None,
+        telegram: TelegramNotifier | None,
     ) -> None:
         """Initialize the collector scheduler.
         
         Args:
-            config: Configuration for the collector
-            store: Storage for collected readings
-            history: Optional history storage
-            telegram: Optional telegram notifier
+            config: MystMon configuration
+            store: Reading storage for current metrics
+            history: History storage for persistent data (optional)
+            telegram: Telegram notifier for alerts (optional)
         """
         self.config = config
         self.store = store
         self.history = history
         self.telegram = telegram
-        self._running = False
-        self._collect_task: asyncio.Task[None] | None = None
-        self._daily_report_task: asyncio.Task[None] | None = None
-
-    async def run_forever(self) -> None:
-        """Run the collector scheduler indefinitely."""
-        self._running = True
-        try:
-            # Run initial collection
-            await self.collect_once()
-            
-            # Schedule daily reports if telegram is enabled
-            if self.telegram and self.config.telegram.enabled:
-                self._daily_report_task = asyncio.create_task(self._run_daily_reports())
-            
-            # Run periodic collection
-            while self._running:
-                await asyncio.sleep(self.config.service.poll_interval_seconds)
-                if self._running:
-                    await self.collect_once()
-        except asyncio.CancelledError:
-            LOGGER.info("Collector scheduler cancelled")
-        except Exception as exc:
-            LOGGER.exception("Collector scheduler failed: %s", exc)
-            raise
-
+        self._stop_event = asyncio.Event()
+        self._collection_counts: dict[str, int] = {}
+    
     def stop(self) -> None:
-        """Stop the collector scheduler."""
-        self._running = False
-        if self._collect_task:
-            self._collect_task.cancel()
-        if self._daily_report_task:
-            self._daily_report_task.cancel()
-
+        """Signal the scheduler to stop."""
+        self._stop_event.set()
+    
+    async def run_forever(self) -> None:
+        """Run the collection scheduler indefinitely.
+        
+        Executes collection cycles at the configured interval until stopped.
+        """
+        LOGGER.info("Starting collector scheduler with interval=%ds", self.config.collection.interval_seconds)
+        while not self._stop_event.is_set():
+            try:
+                await self.collect_once()
+            except Exception:
+                LOGGER.exception("Collection cycle failed")
+            try:
+                await asyncio.wait_for(
+                    self._stop_event.wait(),
+                    timeout=self.config.collection.interval_seconds,
+                )
+            except asyncio.TimeoutError:
+                pass  # Normal timeout, continue to next collection
+        LOGGER.info("Collector scheduler stopped")
+    
     async def collect_once(self) -> dict[str, int]:
-        """Run a single collection cycle.
+        """Execute a single collection cycle.
+        
+        Collects data from all configured sources and updates storage.
         
         Returns:
-            Dictionary with counts of collected items from each source
+            Dictionary with collection counts by source type
         """
         LOGGER.info("Starting collection cycle")
         start_time = time.monotonic()
-        collection_counts: dict[str, int] = {}
+        counts: dict[str, int] = {}
         
-        try:
-            # Collect Prometheus targets
-            if self.config.prometheus.enabled:
-                prometheus_readings = await self._collect_prometheus_targets()
-                self.store.replace_source("prometheus", "prometheus", prometheus_readings)
-                collection_counts["prometheus"] = len(prometheus_readings)
-            
-            # Collect SNMP targets
-            if self.config.snmp.enabled:
-                snmp_readings = await self._collect_snmp_targets()
-                self.store.replace_source("snmp", "snmp", snmp_readings)
-                collection_counts["snmp"] = len(snmp_readings)
-            
-            # Collect MYST nodes
-            if self.config.myst.enabled:
-                myst_readings = await self._collect_myst_nodes()
-                self.store.replace_source("myst", "myst", myst_readings)
-                collection_counts["myst"] = len(myst_readings)
-            
-            # Collect portal data
-            portal_data = None
-            local_nodes = []
-            if self.config.mystnodes_accounts:
-                local_nodes = await self._collect_portal_local_nodes()
-                portal_data = await self._collect_portal_data(local_nodes)
-                # Count total nodes across all accounts
-                total_portal_nodes = self._count_portal_nodes(portal_data)
-                collection_counts["portal_nodes"] = total_portal_nodes
-                if collection_counts.get("myst", 0) == 0 and total_portal_nodes:
-                    collection_counts["myst"] = total_portal_nodes
-            
-            # Build and write snapshot
-            nodes = [r.as_dict() for r in self.store.all() if r.source_type == "myst"]
-            mystnodes_payload = None
-            if portal_data:
-                if isinstance(portal_data, dict):
-                    mystnodes_payload = portal_data
-                else:
-                    mystnodes_payload = {"accounts": portal_data}
-                    if local_nodes:
-                        mystnodes_payload["local_nodes"] = local_nodes
-            snapshot = build_snapshot(nodes, collection_counts, mystnodes_payload)
-            try:
-                write_snapshot(
-                    snapshot,
-                    self.config.outputs.latest_json_path,
-                    self.config.outputs.snmp_extend_path,
-                )
-            except OSError as exc:
-                LOGGER.warning("Skipping snapshot file write path=%s reason=%s", self.config.outputs.latest_json_path, exc)
-            
-            # Store in history if enabled
-            if self.history:
-                collection_id = self.history.append_snapshot(snapshot)
-                LOGGER.info("Snapshot stored in history with ID %d", collection_id)
-            
-            duration = time.monotonic() - start_time
-            LOGGER.info(
-                "Collection cycle completed duration=%.2fs counts=%s",
-                duration,
-                collection_counts,
-            )
-            return collection_counts
-        except Exception as exc:
-            LOGGER.exception("Collection cycle failed: %s", exc)
-            raise
-
-    async def _collect_prometheus_targets(self) -> list[Reading]:
-        """Collect from all Prometheus targets.
+        # Collect from Myst containers/hosts
+        myst_readings = await collect_myst(
+            self.config.collectors.myst,
+            self.config.collection.timeout_seconds,
+        )
+        for reading in myst_readings:
+            self.store.add(reading)
+        counts["myst"] = len(myst_readings)
+        LOGGER.info("Collected myst metrics count=%d", len(myst_readings))
         
-        Returns:
-            List of readings from Prometheus targets
-        """
-        readings: list[Reading] = []
-        for target in self.config.prometheus.targets:
+        # Collect from Prometheus endpoints
+        prometheus_readings = []
+        for target in self.config.collectors.prometheus:
             try:
-                target_readings = await collect_prometheus(target, self.config.service.request_timeout_seconds)
-                readings.extend(target_readings)
-                LOGGER.info("Collected %d readings from Prometheus target %s", len(target_readings), target.name)
-            except Exception as exc:
-                LOGGER.error("Failed to collect from Prometheus target %s: %s", target.name, exc)
-        return readings
-
-    async def _collect_snmp_targets(self) -> list[Reading]:
-        """Collect from all SNMP targets.
+                readings = await collect_prometheus(target, self.config.collection.timeout_seconds)
+                prometheus_readings.extend(readings)
+            except Exception:
+                LOGGER.exception("Prometheus collection failed for target=%s", target.name)
+        for reading in prometheus_readings:
+            self.store.add(reading)
+        counts["prometheus"] = len(prometheus_readings)
+        LOGGER.info("Collected prometheus metrics count=%d", len(prometheus_readings))
         
-        Returns:
-            List of readings from SNMP targets
-        """
-        readings: list[Reading] = []
-        for target in self.config.snmp.targets:
+        # Collect from SNMP targets
+        snmp_readings = []
+        for target in self.config.collectors.snmp:
             try:
-                target_readings = await collect_snmp(
+                readings = await collect_snmp(
                     target,
-                    self.config.snmp.default_community,
-                    self.config.service.request_timeout_seconds,
+                    self.config.collection.default_snmp_community,
+                    self.config.collection.timeout_seconds,
                 )
-                readings.extend(target_readings)
-                LOGGER.info("Collected %d readings from SNMP target %s", len(target_readings), target.name)
-            except Exception as exc:
-                LOGGER.error("Failed to collect from SNMP target %s: %s", target.name, exc)
-        return readings
-
-    async def _collect_myst_nodes(self) -> list[Reading]:
-        """Collect MYST nodes and convert to readings.
+                snmp_readings.extend(readings)
+            except Exception:
+                LOGGER.exception("SNMP collection failed for target=%s", target.name)
+        for reading in snmp_readings:
+            self.store.add(reading)
+        counts["snmp"] = len(snmp_readings)
+        LOGGER.info("Collected snmp metrics count=%d", len(snmp_readings))
         
+        # Collect from MystNodes portal
+        portal_data = await collect_mystnodes_portal_accounts(
+            self.config.collectors.mystnodes.accounts,
+            self.config.collection.timeout_seconds,
+            [reading.raw_data for reading in myst_readings if reading.source_type == "myst"],
+        )
+        counts["mystnodes"] = len(portal_data) if portal_data else 0
+        LOGGER.info("Collected mystnodes data count=%d", counts["mystnodes"])
+        
+        # Build snapshot
+        snapshot = self._build_snapshot(myst_readings, portal_data)
+        
+        # Save snapshot to file
+        self._save_snapshot(snapshot)
+        
+        # Save to history if enabled
+        collection_id = None
+        if self.history is not None:
+            try:
+                collection_id = self.history.append_snapshot(snapshot)
+                LOGGER.info("Saved collection to history id=%s", collection_id)
+            except Exception:
+                LOGGER.exception("Failed to save collection to history")
+        
+        # Generate SNMP extend script if configured
+        if self.config.outputs.snmp_extend_path:
+            try:
+                script_content = render_snmp_extend(snapshot)
+                Path(self.config.outputs.snmp_extend_path).write_text(script_content, encoding="utf-8")
+                LOGGER.info("Generated SNMP extend script path=%s", self.config.outputs.snmp_extend_path)
+            except Exception:
+                LOGGER.exception("Failed to generate SNMP extend script")
+        
+        # Export CSV if configured
+        if self.config.outputs.csv_export_path and collection_id is not None:
+            try:
+                from mystmon.export_csv import write_collection_csv_exports
+                write_collection_csv_exports(
+                    snapshot,
+                    self.config.outputs.csv_export_path,
+                    collection_id,
+                )
+                LOGGER.info("Exported CSV data path=%s collection_id=%s", self.config.outputs.csv_export_path, collection_id)
+            except Exception:
+                LOGGER.exception("Failed to export CSV data")
+        
+        # Send Telegram report if configured and time is right
+        if self.telegram is not None and self.history is not None:
+            try:
+                await self._maybe_send_telegram_report()
+            except Exception:
+                LOGGER.exception("Failed to send Telegram report")
+        
+        # Update collection counts
+        for key, count in counts.items():
+            self._collection_counts[key] = self._collection_counts.get(key, 0) + count
+        
+        elapsed = time.monotonic() - start_time
+        LOGGER.info("Collection cycle completed elapsed=%.2fs counts=%s", elapsed, counts)
+        return counts
+    
+    def _build_snapshot(
+        self,
+        myst_readings: list,
+        portal_data: list | None,
+    ) -> dict:
+        """Build a snapshot of the current state.
+        
+        Args:
+            myst_readings: Readings from Myst containers/hosts
+            portal_data: Data from MystNodes portal
+            
         Returns:
-            List of readings from MYST nodes
+            Dictionary representing the current snapshot
+        """
+        nodes = []
+        for reading in myst_readings:
+            if reading.source_type == "myst" and reading.raw_data:
+                nodes.append(reading.raw_data)
+        
+        return {
+            "generated_at": datetime.now(UTC).isoformat(),
+            "nodes": nodes,
+            "mystnodes": {
+                "accounts": portal_data or [],
+            },
+            "collection_counts": self._collection_counts.copy(),
+        }
+    
+    def _save_snapshot(self, snapshot: dict) -> None:
+        """Save snapshot to the configured JSON file.
+        
+        Args:
+            snapshot: Snapshot data to save
         """
         try:
-            nodes = await collect_myst_nodes_async(
-                self.config.myst,
-                self.config.service.request_timeout_seconds,
-                self.config.service.log_window_seconds,
-                self.config.mystnodes_accounts,
-            )
-            readings = []
-            for node in nodes:
-                readings.append(Reading(
-                    source_type="myst",
-                    source_name=node.get("name", "unknown"),
-                    metric_name="node_info",
-                    value=1.0,
-                    labels={
-                        "container_name": str(node.get("container_name", "")),
-                        "host": str(node.get("host", "")),
-                        "status": str(node.get("status", "unknown")),
-                    },
-                    timestamp=datetime.now(UTC),
-                    raw_data=node,
-                ))
-                # Add uptime metric
-                uptime = node.get("uptime_seconds")
-                if uptime is not None:
-                    readings.append(Reading(
-                        source_type="myst",
-                        source_name=node.get("name", "unknown"),
-                        metric_name="node_uptime_seconds",
-                        value=float(uptime),
-                        labels={},
-                        timestamp=datetime.now(UTC),
-                        raw_data=None,
-                    ))
-                # Add restart count metric
-                restarts = node.get("restart_count")
-                if restarts is not None:
-                    readings.append(Reading(
-                        source_type="myst",
-                        source_name=node.get("name", "unknown"),
-                        metric_name="node_restart_count",
-                        value=float(restarts),
-                        labels={},
-                        timestamp=datetime.now(UTC),
-                        raw_data=None,
-                    ))
-            LOGGER.info("Collected %d MYST nodes", len(nodes))
-            return readings
-        except Exception as exc:
-            LOGGER.error("Failed to collect MYST nodes: %s", exc)
-            return []
-
-    async def _collect_portal_data(self, local_nodes: list[dict[str, Any]] | None = None) -> list[dict[str, Any]] | None:
-        """Collect portal data from all accounts.
+            path = Path(self.config.outputs.latest_json_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(snapshot, indent=2, sort_keys=True), encoding="utf-8")
+            LOGGER.info("Saved snapshot path=%s", path)
+        except Exception:
+            LOGGER.exception("Failed to save snapshot path=%s", self.config.outputs.latest_json_path)
+    
+    async def _maybe_send_telegram_report(self) -> None:
+        """Send Telegram report if it's time to do so."""
+        if self.telegram is None or self.history is None:
+            return
+            
+        now = datetime.now(UTC)
+        report_date = now.strftime("%Y-%m-%d")
         
-        Returns:
-            List of portal account data or None if collection failed
-        """
-        try:
-            portal_data = await collect_mystnodes_portal_accounts(
-                configs=self.config.mystnodes_accounts,
-                timeout_seconds=self.config.service.request_timeout_seconds,
-                local_nodes=local_nodes,
-            )
-            LOGGER.info("Collected portal data from %d accounts", len(portal_data or []))
-            return portal_data
-        except Exception as exc:
-            LOGGER.error("Failed to collect portal data: %s", exc)
-            return None
-
-    async def _collect_portal_local_nodes(self) -> list[dict[str, Any]]:
-        """Collect local portal node data for portal-to-local matching."""
-        return []
-
-    def _count_portal_nodes(self, portal_data: Any) -> int:
-        if isinstance(portal_data, dict):
-            nodes = portal_data.get("nodes", [])
-            if isinstance(nodes, list):
-                return len(nodes)
-            return 0
-        if isinstance(portal_data, list):
-            total = 0
-            for account_data in portal_data:
-                if not isinstance(account_data, dict):
-                    continue
-                nodes = account_data.get("nodes")
-                if isinstance(nodes, list):
-                    total += len(nodes)
-                elif isinstance(nodes, dict):
-                    data_nodes = nodes.get("data")
-                    if isinstance(data_nodes, dict) and isinstance(data_nodes.get("nodes"), list):
-                        total += len(data_nodes["nodes"])
-                    elif isinstance(data_nodes, list):
-                        total += len(data_nodes)
-                    elif isinstance(nodes.get("nodes"), list):
-                        total += len(nodes["nodes"])
-                    elif isinstance(nodes.get("data"), list):
-                        total += len(nodes["data"])
-                else:
-                    endpoints = account_data.get("endpoints") or {}
-                    nodes_endpoint = endpoints.get("nodes") or {}
-                    data = nodes_endpoint.get("data") if isinstance(nodes_endpoint, dict) else None
-                    if isinstance(data, dict) and isinstance(data.get("nodes"), list):
-                        total += len(data["nodes"])
-                    elif isinstance(data, list):
-                        total += len(data)
-            return total
-        return 0
-
-    async def _run_daily_reports(self) -> None:
-        """Run daily reports."""
-        try:
-            while self._running:
-                delay = next_report_delay(self.config.telegram)
-                LOGGER.info("Next telegram report scheduled in %.1f seconds", delay)
-                await asyncio.sleep(delay)
-                if self._running and self.telegram:
-                    try:
-                        await self.telegram.send_report()
-                    except Exception as exc:
-                        LOGGER.error("Failed to send telegram report: %s", exc)
-        except asyncio.CancelledError:
-            LOGGER.info("Daily report task cancelled")
-        except Exception as exc:
-            LOGGER.exception("Daily report task failed: %s", exc)
+        # Check if we should send a report (daily at configured time)
+        if now.hour == self.config.telegram.daily_report_hour and now.minute < 5:
+            if not self.history.report_sent(report_date):
+                try:
+                    await self.telegram.send_report()
+                    self.history.record_report(
+                        report_date,
+                        24,
+                        "sent",
+                        "Daily report sent successfully",
+                    )
+                except Exception as e:
+                    LOGGER.error("Failed to send Telegram report: %s", e)
+                    self.history.record_report(
+                        report_date,
+                        24,
+                        "failed",
+                        f"Failed to send report: {e}",
+                    )
