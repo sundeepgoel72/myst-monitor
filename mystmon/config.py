@@ -306,6 +306,8 @@ class AlertingConfig(BaseModel):
     webhook_notifications: WebhookNotificationConfig = Field(default_factory=WebhookNotificationConfig)
     slack_notifications: SlackNotificationConfig = Field(default_factory=SlackNotificationConfig)
     discord_notifications: DiscordNotificationConfig = Field(default_factory=DiscordNotificationConfig)
+    max_alert_history_days: int = Field(default=30, ge=1)
+    enable_alert_correlation: bool = True
 
 
 class MystMonConfig(BaseModel):

@@ -112,6 +112,42 @@ class ReadingStore:
             )
         ''')
         
+        # Create indexes for better query performance
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_readings_source_type 
+            ON readings(source_type)
+        ''')
+        
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_readings_source_name 
+            ON readings(source_name)
+        ''')
+        
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_readings_metric_name 
+            ON readings(metric_name)
+        ''')
+        
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_readings_timestamp 
+            ON readings(timestamp)
+        ''')
+        
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_alerts_state 
+            ON alerts(state)
+        ''')
+        
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_alerts_severity 
+            ON alerts(severity)
+        ''')
+        
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_alerts_last_updated 
+            ON alerts(last_updated)
+        ''')
+        
         conn.commit()
         conn.close()
     
@@ -330,8 +366,8 @@ class ReadingStore:
         except Exception as e:
             logger.error(f"Failed to persist alert: {e}")
     
-    def get_alert_history(self, limit: int = 100) -> List[Any]:
-        """Get alert history from the database."""
+    def get_alert_history(self, limit: int = 100, offset: int = 0) -> List[Any]:
+        """Get alert history from the database with pagination."""
         if not self.db_path:
             return []
             
@@ -343,8 +379,8 @@ class ReadingStore:
                        fingerprint, last_updated, acknowledged_at, acknowledged_by
                 FROM alerts
                 ORDER BY last_updated DESC
-                LIMIT ?
-            ''', (limit,))
+                LIMIT ? OFFSET ?
+            ''', (limit, offset))
             
             alerts = []
             for row in cursor.fetchall():
@@ -371,4 +407,88 @@ class ReadingStore:
             return alerts
         except Exception as e:
             logger.error(f"Failed to get alert history: {e}")
+            return []
+    
+    def get_alerts_by_state(self, state: str, limit: int = 100) -> List[Any]:
+        """Get alerts by state from the database."""
+        if not self.db_path:
+            return []
+            
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, name, severity, state, summary, description, labels, starts_at, ends_at,
+                       fingerprint, last_updated, acknowledged_at, acknowledged_by
+                FROM alerts
+                WHERE state = ?
+                ORDER BY last_updated DESC
+                LIMIT ?
+            ''', (state, limit))
+            
+            alerts = []
+            for row in cursor.fetchall():
+                alert_data = {
+                    'id': row[0],
+                    'name': row[1],
+                    'severity': row[2],
+                    'state': row[3],
+                    'summary': row[4],
+                    'description': row[5],
+                    'labels': eval(row[6]) if row[6] else {},
+                    'starts_at': datetime.fromisoformat(row[7]) if row[7] else None,
+                    'ends_at': datetime.fromisoformat(row[8]) if row[8] else None,
+                    'fingerprint': row[9],
+                    'last_updated': datetime.fromisoformat(row[10]) if row[10] else None,
+                    'acknowledged_at': datetime.fromisoformat(row[11]) if row[11] else None,
+                    'acknowledged_by': row[12]
+                }
+                alerts.append(alert_data)
+            
+            conn.close()
+            return alerts
+        except Exception as e:
+            logger.error(f"Failed to get alerts by state: {e}")
+            return []
+    
+    def get_alerts_by_severity(self, severity: str, limit: int = 100) -> List[Any]:
+        """Get alerts by severity from the database."""
+        if not self.db_path:
+            return []
+            
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, name, severity, state, summary, description, labels, starts_at, ends_at,
+                       fingerprint, last_updated, acknowledged_at, acknowledged_by
+                FROM alerts
+                WHERE severity = ?
+                ORDER BY last_updated DESC
+                LIMIT ?
+            ''', (severity, limit))
+            
+            alerts = []
+            for row in cursor.fetchall():
+                alert_data = {
+                    'id': row[0],
+                    'name': row[1],
+                    'severity': row[2],
+                    'state': row[3],
+                    'summary': row[4],
+                    'description': row[5],
+                    'labels': eval(row[6]) if row[6] else {},
+                    'starts_at': datetime.fromisoformat(row[7]) if row[7] else None,
+                    'ends_at': datetime.fromisoformat(row[8]) if row[8] else None,
+                    'fingerprint': row[9],
+                    'last_updated': datetime.fromisoformat(row[10]) if row[10] else None,
+                    'acknowledged_at': datetime.fromisoformat(row[11]) if row[11] else None,
+                    'acknowledged_by': row[12]
+                }
+                alerts.append(alert_data)
+            
+            conn.close()
+            return alerts
+        except Exception as e:
+            logger.error(f"Failed to get alerts by severity: {e}")
             return []

@@ -44,6 +44,7 @@ class Alert:
     acknowledged_by: Optional[str] = None
     suppressed_until: Optional[datetime] = None
     group_id: Optional[str] = None
+    correlation_id: Optional[str] = None
 
 
 class AlertGroup:
@@ -77,6 +78,13 @@ class AlertTemplate:
         return summary, description
 
 
+class CorrelationRule:
+    def __init__(self, name: str, condition: Callable[[List[Alert]], bool], action: Callable[[List[Alert]], None]):
+        self.name = name
+        self.condition = condition
+        self.action = action
+
+
 class AlertingRule:
     def __init__(
         self,
@@ -87,7 +95,8 @@ class AlertingRule:
         description: str,
         labels: Optional[dict[str, str]] = None,
         group_by: Optional[List[str]] = None,
-        template: Optional[AlertTemplate] = None
+        template: Optional[AlertTemplate] = None,
+        correlation_rules: Optional[List[CorrelationRule]] = None
     ):
         self.name = name
         self.condition = condition
@@ -97,6 +106,7 @@ class AlertingRule:
         self.labels = labels or {}
         self.group_by = group_by or []
         self.template = template
+        self.correlation_rules = correlation_rules or []
 
 
 class AlertManager:
@@ -108,8 +118,10 @@ class AlertManager:
         self.alert_groups: Dict[str, AlertGroup] = {}
         self.suppression_rules: List[SuppressionRule] = []
         self.alert_templates: Dict[str, AlertTemplate] = {}
+        self.correlation_rules: List[CorrelationRule] = []
         self._initialize_default_rules()
         self._initialize_default_templates()
+        self._initialize_default_correlation_rules()
     
     def _initialize_default_templates(self) -> None:
         """Initialize default alert templates."""
@@ -133,6 +145,45 @@ class AlertManager:
             "The Mysterium node {node_name} has {error_count} error or warning logs",
             AlertSeverity.WARNING
         )
+    
+    def _initialize_default_correlation_rules(self) -> None:
+        """Initialize default correlation rules."""
+        # Rule to correlate multiple node offline alerts
+        def multiple_nodes_offline_condition(alerts: List[Alert]) -> bool:
+            offline_alerts = [alert for alert in alerts if alert.name == "node_offline"]
+            return len(offline_alerts) > 3
+        
+        def multiple_nodes_offline_action(alerts: List[Alert]) -> None:
+            LOGGER.info(f"Detected {len([alert for alert in alerts if alert.name == 'node_offline'])} nodes offline - possible network issue")
+        
+        self.correlation_rules.append(CorrelationRule(
+            "multiple_nodes_offline",
+            multiple_nodes_offline_condition,
+            multiple_nodes_offline_action
+        ))
+        
+        # Rule to correlate node quality and error alerts
+        def node_quality_and_errors_condition(alerts: List[Alert]) -> bool:
+            quality_alerts = [alert for alert in alerts if alert.name == "node_low_quality"]
+            error_alerts = [alert for alert in alerts if alert.name == "node_high_errors"]
+            # Check if any node has both quality and error alerts
+            quality_nodes = {alert.labels.get("source") for alert in quality_alerts}
+            error_nodes = {alert.labels.get("source") for alert in error_alerts}
+            return bool(quality_nodes & error_nodes)
+        
+        def node_quality_and_errors_action(alerts: List[Alert]) -> None:
+            quality_alerts = [alert for alert in alerts if alert.name == "node_low_quality"]
+            error_alerts = [alert for alert in alerts if alert.name == "node_high_errors"]
+            quality_nodes = {alert.labels.get("source") for alert in quality_alerts}
+            error_nodes = {alert.labels.get("source") for alert in error_alerts}
+            common_nodes = quality_nodes & error_nodes
+            LOGGER.info(f"Nodes {common_nodes} have both quality and error issues - possible configuration problem")
+        
+        self.correlation_rules.append(CorrelationRule(
+            "node_quality_and_errors",
+            node_quality_and_errors_condition,
+            node_quality_and_errors_action
+        ))
     
     def _initialize_default_rules(self) -> None:
         """Initialize default alerting rules for common node issues."""
@@ -232,6 +283,10 @@ class AlertManager:
         """Add a new alert group."""
         self.alert_groups[group.id] = group
     
+    def add_correlation_rule(self, rule: CorrelationRule) -> None:
+        """Add a new correlation rule."""
+        self.correlation_rules.append(rule)
+    
     def _generate_group_id(self, alert: Alert, group_by: List[str]) -> str:
         """Generate a group ID based on alert labels."""
         if not group_by:
@@ -246,6 +301,11 @@ class AlertManager:
             return None
         
         return hashlib.md5("_".join(sorted(group_values)).encode()).hexdigest()
+    
+    def _generate_correlation_id(self, alert: Alert) -> str:
+        """Generate a correlation ID based on alert properties."""
+        correlation_data = f"{alert.name}_{alert.severity.value}_{alert.labels.get('source', 'unknown')}"
+        return hashlib.md5(correlation_data.encode()).hexdigest()
     
     def _apply_suppression_rules(self, alert: Alert) -> bool:
         """Apply suppression rules to an alert. Returns True if alert should be suppressed."""
@@ -273,6 +333,13 @@ class AlertManager:
                     alert.suppressed_until = now + rule.duration
                     return True
         return False
+    
+    def _apply_correlation_rules(self, new_alerts: List[Alert]) -> None:
+        """Apply correlation rules to new alerts."""
+        all_alerts = list(self.active_alerts.values()) + new_alerts
+        for rule in self.correlation_rules:
+            if rule.condition(all_alerts):
+                rule.action(all_alerts)
     
     def evaluate_reading(self, reading: Any) -> List[Alert]:
         """Evaluate a single reading against all alerting rules."""
@@ -307,6 +374,19 @@ class AlertManager:
                     last_updated=now
                 ), rule.group_by)
                 
+                # Generate correlation ID
+                correlation_id = self._generate_correlation_id(Alert(
+                    id=alert_id,
+                    name=rule.name,
+                    severity=rule.severity,
+                    state=AlertState.FIRING,
+                    summary=summary,
+                    description=description,
+                    labels={**rule.labels, "source": reading.source_name if hasattr(reading, 'source_name') else 'unknown'},
+                    starts_at=now,
+                    last_updated=now
+                ))
+                
                 # Check if alert already exists
                 if alert_id in self.active_alerts:
                     # Update existing alert
@@ -314,6 +394,7 @@ class AlertManager:
                     alert.state = AlertState.FIRING
                     alert.last_updated = now
                     alert.group_id = group_id
+                    alert.correlation_id = correlation_id
                 else:
                     # Create new alert
                     alert = Alert(
@@ -326,7 +407,8 @@ class AlertManager:
                         labels={**rule.labels, "source": reading.source_name if hasattr(reading, 'source_name') else 'unknown'},
                         starts_at=now,
                         last_updated=now,
-                        group_id=group_id
+                        group_id=group_id,
+                        correlation_id=correlation_id
                     )
                     
                     # Apply suppression rules
@@ -367,6 +449,9 @@ class AlertManager:
         for reading in store.all():
             alerts = self.evaluate_reading(reading)
             all_alerts.extend(alerts)
+        
+        # Apply correlation rules
+        self._apply_correlation_rules(all_alerts)
         
         # Resolve alerts that are no longer firing
         resolved_alerts = []
@@ -434,6 +519,16 @@ class AlertManager:
                     alert.state = AlertState.FIRING
                     alert.suppressed_until = None
         return suppressed
+    
+    def get_alerts_by_severity(self, severity: AlertSeverity) -> List[Alert]:
+        """Get all alerts by severity."""
+        return [alert for alert in self.active_alerts.values() if alert.severity == severity]
+    
+    def get_alerts_by_group(self, group_id: str) -> List[Alert]:
+        """Get all alerts in a group."""
+        if group_id in self.alert_groups:
+            return self.alert_groups[group_id].alerts
+        return []
 
 
 def create_default_alert_manager(config: MystMonConfig) -> AlertManager:
