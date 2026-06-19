@@ -261,6 +261,12 @@ class UIConfig(BaseModel):
     theme: str = Field(default="system", pattern="^(light|dark|system)$")
 
 
+class AlertingConfig(BaseModel):
+    enabled: bool = True
+    evaluation_interval_seconds: int = Field(default=60, ge=10)
+    notification_cooldown_seconds: int = Field(default=3600, ge=60)  # 1 hour
+
+
 class MystMonConfig(BaseModel):
     service: ServiceConfig = Field(default_factory=ServiceConfig)
     prometheus: PrometheusConfig = Field(default_factory=PrometheusConfig)
@@ -272,6 +278,7 @@ class MystMonConfig(BaseModel):
     history: HistoryConfig = Field(default_factory=HistoryConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
+    alerting: AlertingConfig = Field(default_factory=AlertingConfig)
 
 
 def _validate_required_config(config: MystMonConfig) -> None:

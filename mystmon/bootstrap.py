@@ -73,6 +73,24 @@ def _bootstrap_database(db_file: Path) -> None:
                 status TEXT NOT NULL,
                 message TEXT NOT NULL
             );
+            
+            CREATE TABLE IF NOT EXISTS alerts (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                state TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                description TEXT NOT NULL,
+                labels_json TEXT NOT NULL,
+                starts_at TEXT NOT NULL,
+                ends_at TEXT,
+                fingerprint TEXT,
+                last_updated TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_alerts_state
+                ON alerts(state);
+            CREATE INDEX IF NOT EXISTS idx_alerts_severity
+                ON alerts(severity);
             """
         )
         _ensure_node_metric_columns(db)

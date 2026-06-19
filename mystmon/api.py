@@ -20,6 +20,7 @@ from mystmon.scheduler import CollectorScheduler
 from mystmon.storage import ReadingStore
 from mystmon.telegram import TelegramNotifier
 from mystmon.ui import create_ui_router
+from mystmon.alerting import create_default_alert_manager, Alert
 
 LOGGER = logging.getLogger(__name__)
 
@@ -29,7 +30,8 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
     store = ReadingStore()
     history = HistoryStore(app_config.history.db_path) if app_config.history.enabled else None
     telegram = TelegramNotifier(app_config)
-    scheduler = CollectorScheduler(app_config, store, history, telegram)
+    alert_manager = create_default_alert_manager(app_config) if app_config.alerting.enabled else None
+    scheduler = CollectorScheduler(app_config, store, history, telegram, alert_manager)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -51,6 +53,7 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
     app.state.store = store
     app.state.history = history
     app.state.telegram = telegram
+    app.state.alert_manager = alert_manager
     app.state.scheduler = scheduler
 
     # Mount static files for UI
@@ -152,6 +155,19 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
     @app.post("/api/v1/telegram/report")
     async def telegram_report(hours: int = 24) -> dict:
         return await telegram.send_report(hours=hours, force=True)
+
+    @app.get("/api/v1/alerts")
+    async def get_alerts() -> list[dict]:
+        if alert_manager is None:
+            return []
+        return [alert.__dict__ for alert in alert_manager.get_active_alerts()]
+
+    @app.get("/api/v1/alerts/evaluate")
+    async def evaluate_alerts() -> list[dict]:
+        if alert_manager is None:
+            return []
+        alerts = alert_manager.evaluate_all_readings(store)
+        return [alert.__dict__ for alert in alerts]
 
     @app.get("/api/v1/metrics")
     @app.get("/metrics")
@@ -272,6 +288,18 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
             ["account"],
             registry=registry,
         )
+
+        # Alert metrics
+        alert_gauge = Gauge(
+            "mystmon_alerts_active",
+            "Number of active alerts by severity.",
+            ["severity"],
+            registry=registry,
+        )
+        if alert_manager is not None:
+            active_alerts = alert_manager.get_active_alerts()
+            for alert in active_alerts:
+                alert_gauge.labels(alert.severity.value).inc()
 
         for reading in store.all():
             if isinstance(reading.value, (int, float)):

@@ -323,6 +323,13 @@ async def _collect_node_followups(
         if config.node_services_enabled:
             await _throttle(config)
             node_result["services"] = await _fetch_dynamic(client, config, "node_services", f"/api/v2/node/{node_key}/services", headers)
+        # Collect additional metrics for enhanced monitoring
+        await _throttle(config)
+        node_result["sessions"] = await _fetch_dynamic(client, config, "node_sessions", f"/api/v2/node/{node_key}/sessions", headers)
+        await _throttle(config)
+        node_result["earnings"] = await _fetch_dynamic(client, config, "node_earnings", f"/api/v2/node/{node_key}/earnings", headers)
+        await _throttle(config)
+        node_result["transferred"] = await _fetch_dynamic(client, config, "node_transferred", f"/api/v2/node/{node_key}/transferred", headers)
         details["nodes"][node_id] = node_result
     return details
 
@@ -619,7 +626,7 @@ def _log_endpoint_result(endpoint: str, result: Dict[str, Any]) -> None:
     if endpoint == "node_totals":
         LOGGER.info("MystNodes portal result endpoint=node_totals status=%s ok=%s summary=%s", status, ok, _compact_node_totals(data))
         return
-    if endpoint in {"total_earnings", "total_transferred", "earnings_30d", "node_detail", "node_services"}:
+    if endpoint in {"total_earnings", "total_transferred", "earnings_30d", "node_detail", "node_services", "node_sessions", "node_earnings", "node_transferred"}:
         LOGGER.info("MystNodes portal result endpoint=%s status=%s ok=%s summary=%s", endpoint, status, ok, _compact_value(data))
         return
     LOGGER.info("MystNodes portal result endpoint=%s status=%s ok=%s", endpoint, status, ok)

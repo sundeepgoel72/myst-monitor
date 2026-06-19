@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from mystmon.history import HistoryStore
     from mystmon.storage import ReadingStore
     from mystmon.telegram import TelegramNotifier
+    from mystmon.alerting import AlertManager
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ class CollectorScheduler:
         store: ReadingStore,
         history: HistoryStore | None,
         telegram: TelegramNotifier | None,
+        alert_manager: AlertManager | None = None,
     ) -> None:
         """Initialize the collector scheduler.
         
@@ -53,13 +55,16 @@ class CollectorScheduler:
             store: Reading storage for current metrics
             history: History storage for persistent data (optional)
             telegram: Telegram notifier for alerts (optional)
+            alert_manager: Alert manager for alert evaluation (optional)
         """
         self.config = config
         self.store = store
         self.history = history
         self.telegram = telegram
+        self.alert_manager = alert_manager
         self._stop_event = asyncio.Event()
         self._collection_counts: dict[str, int] = {}
+        self._last_alert_evaluation = datetime.now()
     
     def stop(self) -> None:
         """Signal the scheduler to stop."""
@@ -70,16 +75,19 @@ class CollectorScheduler:
         
         Executes collection cycles at the configured interval until stopped.
         """
-        LOGGER.info("Starting collector scheduler with interval=%ds", self.config.collection.interval_seconds)
+        LOGGER.info("Starting collector scheduler with interval=%ds", self.config.service.poll_interval_seconds)
         while not self._stop_event.is_set():
             try:
                 await self.collect_once()
+                # Evaluate alerts if alerting is enabled
+                if self.alert_manager and self.config.alerting.enabled:
+                    await self._evaluate_alerts()
             except Exception:
                 LOGGER.exception("Collection cycle failed")
             try:
                 await asyncio.wait_for(
                     self._stop_event.wait(),
-                    timeout=self.config.collection.interval_seconds,
+                    timeout=self.config.service.poll_interval_seconds,
                 )
             except asyncio.TimeoutError:
                 pass  # Normal timeout, continue to next collection
@@ -99,8 +107,8 @@ class CollectorScheduler:
         
         # Collect from Myst containers/hosts
         myst_readings = await collect_myst(
-            self.config.collectors.myst,
-            self.config.collection.timeout_seconds,
+            self.config.myst,
+            self.config.service.request_timeout_seconds,
         )
         for reading in myst_readings:
             self.store.add(reading)
@@ -109,9 +117,9 @@ class CollectorScheduler:
         
         # Collect from Prometheus endpoints
         prometheus_readings = []
-        for target in self.config.collectors.prometheus:
+        for target in self.config.prometheus.targets:
             try:
-                readings = await collect_prometheus(target, self.config.collection.timeout_seconds)
+                readings = await collect_prometheus(target, self.config.service.request_timeout_seconds)
                 prometheus_readings.extend(readings)
             except Exception:
                 LOGGER.exception("Prometheus collection failed for target=%s", target.name)
@@ -122,12 +130,12 @@ class CollectorScheduler:
         
         # Collect from SNMP targets
         snmp_readings = []
-        for target in self.config.collectors.snmp:
+        for target in self.config.snmp.targets:
             try:
                 readings = await collect_snmp(
                     target,
-                    self.config.collection.default_snmp_community,
-                    self.config.collection.timeout_seconds,
+                    self.config.snmp.default_community,
+                    self.config.service.request_timeout_seconds,
                 )
                 snmp_readings.extend(readings)
             except Exception:
@@ -139,8 +147,8 @@ class CollectorScheduler:
         
         # Collect from MystNodes portal
         portal_data = await collect_mystnodes_portal_accounts(
-            self.config.collectors.mystnodes.accounts,
-            self.config.collection.timeout_seconds,
+            self.config.mystnodes_accounts,
+            self.config.service.request_timeout_seconds,
             [reading.raw_data for reading in myst_readings if reading.source_type == "myst"],
         )
         counts["mystnodes"] = len(portal_data) if portal_data else 0
@@ -267,3 +275,31 @@ class CollectorScheduler:
                         "failed",
                         f"Failed to send report: {e}",
                     )
+    
+    async def _evaluate_alerts(self) -> None:
+        """Evaluate alerts based on current readings."""
+        if not self.alert_manager or not self.config.alerting.enabled:
+            return
+            
+        now = datetime.now()
+        # Only evaluate alerts at the configured interval
+        if (now - self._last_alert_evaluation).seconds < self.config.alerting.evaluation_interval_seconds:
+            return
+            
+        LOGGER.debug("Evaluating alerts")
+        try:
+            alerts = self.alert_manager.evaluate_all_readings(self.store)
+            if alerts:
+                LOGGER.info("Found %d active alerts", len(alerts))
+                # In a full implementation, we would send notifications here
+                # For now, we'll just log them
+                for alert in alerts:
+                    LOGGER.warning(
+                        "ALERT: %s - %s (Severity: %s)",
+                        alert.name,
+                        alert.summary,
+                        alert.severity.value
+                    )
+            self._last_alert_evaluation = now
+        except Exception:
+            LOGGER.exception("Failed to evaluate alerts")

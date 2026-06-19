@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Iterator, List
+from typing import Any, Iterator, List, Optional, Callable
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,7 @@ class ReadingStore:
         """
         self._readings: dict[tuple[str, str], Reading] = {}
         self._by_source_type: dict[str, set[tuple[str, str]]] = {}
+        self._by_metric: dict[str, set[tuple[str, str]]] = {}
     
     def add(self, reading: Reading) -> None:
         """Add a reading to the store.
@@ -80,6 +81,11 @@ class ReadingStore:
         if reading.source_type not in self._by_source_type:
             self._by_source_type[reading.source_type] = set()
         self._by_source_type[reading.source_type].add(key)
+        
+        # Update metric index
+        if reading.metric_name not in self._by_metric:
+            self._by_metric[reading.metric_name] = set()
+        self._by_metric[reading.metric_name].add(key)
     
     def replace_source(self, source_type: str, source_name: str, readings: List[Reading]) -> None:
         """Replace all readings for a given source.
@@ -99,6 +105,11 @@ class ReadingStore:
                 if key[1] == source_name
             }
             for key in keys_to_remove:
+                # Remove from metric index
+                reading = self._readings.get(key)
+                if reading and reading.metric_name in self._by_metric:
+                    self._by_metric[reading.metric_name].discard(key)
+                
                 del self._readings[key]
                 self._by_source_type[source_type].discard(key)
         
@@ -141,6 +152,33 @@ class ReadingStore:
         for key in self._by_source_type[source_type]:
             yield self._readings[key]
     
+    def by_metric(self, metric_name: str) -> Iterator[Reading]:
+        """Get all readings for a given metric.
+        
+        Args:
+            metric_name: Name of the metric
+            
+        Returns:
+            Iterator over readings for the metric
+        """
+        if metric_name not in self._by_metric:
+            return
+        for key in self._by_metric[metric_name]:
+            reading = self._readings.get(key)
+            if reading:
+                yield reading
+    
+    def filter(self, predicate: Callable[[Reading], bool]) -> List[Reading]:
+        """Filter readings by a predicate function.
+        
+        Args:
+            predicate: Function that takes a Reading and returns True/False
+            
+        Returns:
+            List of readings that match the predicate
+        """
+        return [reading for reading in self._readings.values() if predicate(reading)]
+    
     def clear_old(self, max_age: timedelta) -> int:
         """Clear readings older than max_age.
         
@@ -160,9 +198,12 @@ class ReadingStore:
         
         count = len(old_keys)
         for key in old_keys:
+            reading = self._readings[key]
+            # Remove from indices
+            if reading.source_type in self._by_source_type:
+                self._by_source_type[reading.source_type].discard(key)
+            if reading.metric_name in self._by_metric:
+                self._by_metric[reading.metric_name].discard(key)
             del self._readings[key]
-            source_type = key[0]
-            if source_type in self._by_source_type:
-                self._by_source_type[source_type].discard(key)
         
         return count
