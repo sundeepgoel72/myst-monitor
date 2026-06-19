@@ -1,0 +1,4 @@
+class OutputConfig(BaseModel):
+    latest_json_path: str = "/data/mystmon/latest.json"
+    snmp_extend_path: str = "/data/mystmon/snmp_extend.txt"
+    csv_export_path: str = "/data/mystmon/csv"
