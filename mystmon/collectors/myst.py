@@ -127,6 +127,52 @@ async def collect_myst(config: MystCollectorConfig, timeout_seconds: int) -> Lis
     return readings
 
 
+def render_myst_snapshot(snapshot: dict[str, Any]) -> str:
+    """Render myst snapshot data to string format.
+    
+    Args:
+        snapshot: Snapshot data dictionary
+        
+    Returns:
+        Formatted string representation of the snapshot
+    """
+    lines = []
+    
+    # Add header
+    lines.append("# Mysterium Node Snapshot")
+    lines.append("")
+    
+    # Add container information
+    if "containers" in snapshot:
+        lines.append("## Containers")
+        for container in snapshot.get("containers", []):
+            lines.append(f"- **{container.get('name', 'Unknown')}**")
+            lines.append(f"  - Status: {container.get('status', 'unknown')}")
+            lines.append(f"  - Running: {container.get('running', False)}")
+            if container.get("uptime_seconds") is not None:
+                lines.append(f"  - Uptime: {container.get('uptime_seconds', 0):.0f}s")
+            lines.append("")
+    
+    # Add API information
+    if "api_endpoints" in snapshot:
+        lines.append("## API Endpoints")
+        for endpoint in snapshot.get("api_endpoints", []):
+            lines.append(f"- **{endpoint.get('name', 'Unknown')}** ({endpoint.get('path', '/')})")
+            lines.append(f"  - Status: {endpoint.get('status', 'unknown')}")
+            if "response_time" in endpoint:
+                lines.append(f"  - Response Time: {endpoint.get('response_time', 0):.2f}ms")
+            lines.append("")
+    
+    # Add metrics
+    if "metrics" in snapshot:
+        lines.append("## Metrics")
+        for metric in snapshot.get("metrics", []):
+            lines.append(f"- {metric.get('name', 'unknown')}: {metric.get('value', 0)}")
+        lines.append("")
+    
+    return "\n".join(lines)
+
+
 async def _collect_local_containers(config: MystCollectorConfig, timeout_seconds: int) -> List[Reading]:
     """Collect metrics from local Docker containers.
     
