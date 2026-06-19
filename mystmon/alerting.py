@@ -35,6 +35,7 @@ class Alert:
     starts_at: datetime
     ends_at: Optional[datetime] = None
     fingerprint: str = ""
+    last_updated: datetime = None
 
 
 class AlertingRule:
@@ -151,28 +152,55 @@ class AlertManager:
     def evaluate_reading(self, reading: Any) -> List[Alert]:
         """Evaluate a single reading against all alerting rules."""
         alerts = []
+        now = datetime.now()
         for rule in self.alerting_rules:
             if rule.condition(reading):
                 alert_id = f"{rule.name}_{reading.source_name if hasattr(reading, 'source_name') else 'unknown'}"
-                alert = Alert(
-                    id=alert_id,
-                    name=rule.name,
-                    severity=rule.severity,
-                    state=AlertState.FIRING,
-                    summary=rule.summary,
-                    description=rule.description,
-                    labels={**rule.labels, "source": reading.source_name if hasattr(reading, 'source_name') else 'unknown'},
-                    starts_at=datetime.now()
-                )
+                # Check if alert already exists
+                if alert_id in self.active_alerts:
+                    # Update existing alert
+                    alert = self.active_alerts[alert_id]
+                    alert.state = AlertState.FIRING
+                    alert.last_updated = now
+                else:
+                    # Create new alert
+                    alert = Alert(
+                        id=alert_id,
+                        name=rule.name,
+                        severity=rule.severity,
+                        state=AlertState.FIRING,
+                        summary=rule.summary,
+                        description=rule.description,
+                        labels={**rule.labels, "source": reading.source_name if hasattr(reading, 'source_name') else 'unknown'},
+                        starts_at=now,
+                        last_updated=now
+                    )
+                    self.active_alerts[alert_id] = alert
                 alerts.append(alert)
         return alerts
     
     def evaluate_all_readings(self, store: ReadingStore) -> List[Alert]:
         """Evaluate all current readings against alerting rules."""
+        # First, mark all existing alerts as potentially resolved
+        now = datetime.now()
+        for alert in self.active_alerts.values():
+            if alert.state == AlertState.FIRING:
+                alert.state = AlertState.RESOLVED
+                alert.ends_at = now
+        
+        # Evaluate all readings
         all_alerts = []
         for reading in store.all():
             alerts = self.evaluate_reading(reading)
             all_alerts.extend(alerts)
+        
+        # Resolve alerts that are no longer firing
+        resolved_alerts = []
+        for alert_id, alert in list(self.active_alerts.items()):
+            if alert.state == AlertState.RESOLVED and alert.ends_at:
+                resolved_alerts.append(alert)
+                del self.active_alerts[alert_id]
+        
         return all_alerts
     
     def resolve_alert(self, alert_id: str) -> None:
@@ -185,6 +213,10 @@ class AlertManager:
     def get_active_alerts(self) -> List[Alert]:
         """Get all currently active alerts."""
         return [alert for alert in self.active_alerts.values() if alert.state == AlertState.FIRING]
+    
+    def get_all_alerts(self) -> List[Alert]:
+        """Get all alerts (active and resolved)."""
+        return list(self.active_alerts.values())
 
 
 def create_default_alert_manager(config: MystMonConfig) -> AlertManager:
