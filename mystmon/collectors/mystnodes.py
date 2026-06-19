@@ -13,13 +13,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from urllib.parse import urlencode
 from typing import Any, Dict, List
 
 import httpx
 
 from mystmon.config import MystNodesPortalAccountConfig, MystNodesPortalEndpointConfig
-from mystmon.collectors.myst import _redact_api_value
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ async def collect_mystnodes_portal_accounts(
         List of account data or error dictionaries
     """
     if not configs:
-        return []
+        return None
 
     # Filter to only enabled configs for actual collection
     enabled_configs = [config for config in configs if config.enabled]
@@ -52,7 +52,7 @@ async def collect_mystnodes_portal_accounts(
     ]
     
     if not tasks:
-        return []
+        return None
     
     results = await asyncio.gather(*tasks, return_exceptions=True)
     
@@ -84,6 +84,15 @@ async def collect_mystnodes_portal_accounts(
             processed_results.append(result)
     
     return processed_results
+
+
+async def collect_mystnodes_portal(
+    configs: List[MystNodesPortalAccountConfig],
+    timeout_seconds: int,
+    local_nodes: List[Dict[str, Any]] | None = None,
+) -> List[Any] | None:
+    """Backward-compatible alias for multi-account portal collection."""
+    return await collect_mystnodes_portal_accounts(configs, timeout_seconds, local_nodes)
 
 
 async def collect_mystnodes_portal_account(
@@ -766,6 +775,38 @@ def _compact_node_totals(data: Any) -> str:
         else:
             parts.append(f"{key}={value}")
     return "; ".join(parts[:12])
-```
 
-.codex/HANDOVER.md
+
+def _redact_api_value(value: Any, max_chars: int = 2000) -> Any:
+    """Redact sensitive information from API values."""
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        for key, item in value.items():
+            key_name = str(key)
+            if not _is_log_safe_key(key_name):
+                redacted[key_name] = "***REDACTED***"
+            else:
+                redacted[key_name] = _redact_api_value(item, max_chars)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_api_value(item, max_chars) for item in value[:20]]
+    if isinstance(value, str):
+        if re.search(r"\b0x[a-fA-F0-9]{40}\b", value):
+            return False
+        sensitive_patterns = [
+            r"(?<!0x)[a-zA-Z0-9]{32,}",
+            r"password|secret|token|private|key|mnemonic|wallet|hash",
+        ]
+        lower_value = value.lower()
+        for pattern in sensitive_patterns:
+            if re.search(pattern, lower_value):
+                return "***REDACTED***"
+        return value if len(value) <= max_chars else f"{value[:max_chars]}...<truncated>"
+    return value
+
+
+def _is_log_safe_key(key: str) -> bool:
+    """Check if a key is safe to log."""
+    lowered = key.lower()
+    blocked = ("password", "secret", "token", "private", "key", "mnemonic", "email", "wallet", "hash", "address")
+    return not any(item in lowered for item in blocked)

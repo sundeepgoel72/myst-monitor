@@ -23,9 +23,11 @@ def build_snapshot(
 
 def write_snapshot(snapshot: dict[str, Any], latest_json_path: str, snmp_extend_path: str) -> None:
     latest_path = Path(latest_json_path)
+    latest_path.parent.mkdir(parents=True, exist_ok=True)
     latest_path.write_text(json.dumps(snapshot, indent=2, sort_keys=True), encoding="utf-8")
 
     snmp_path = Path(snmp_extend_path)
+    snmp_path.parent.mkdir(parents=True, exist_ok=True)
     snmp_path.write_text(render_snmp_extend(snapshot), encoding="utf-8")
 
 
