@@ -19,7 +19,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY mystmon ./mystmon
-COPY config.yaml ./config.yaml
+COPY config.example.yaml ./config.yaml
 
 EXPOSE 8072 8073
 
