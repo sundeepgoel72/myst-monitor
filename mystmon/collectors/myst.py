@@ -1,11 +1,8 @@
 """Mysterium node collector for retrieving metrics from TequilAPI endpoints.
 
 This module provides functionality to collect metrics from Mysterium nodes
-running locally or on remote hosts. It handles Docker container discovery,
-TequilAPI endpoint probing, and metric collection from various endpoints.
-
-The collector supports both local Docker containers and remote hosts with
-configurable authentication and port settings.
+running on configured local hosts or remote hosts. It handles explicit
+host-based TequilAPI probing and metric collection from various endpoints.
 """
 
 from __future__ import annotations
@@ -115,7 +112,7 @@ async def collect_myst(config: MystCollectorConfig, timeout_seconds: int) -> Lis
     """
     readings: List[Reading] = []
     
-    # Collect from local Docker containers
+    # Collect from configured local runtimes on WSL/host networking.
     if config.enabled:
         container_readings = await _collect_local_containers(config, timeout_seconds)
         readings.extend(container_readings)
@@ -174,42 +171,49 @@ def render_myst_snapshot(snapshot: dict[str, Any]) -> str:
 
 
 async def _collect_local_containers(config: MystCollectorConfig, timeout_seconds: int) -> List[Reading]:
-    """Collect metrics from local Docker containers.
-    
-    Args:
-        config: Collector configuration
-        timeout_seconds: Request timeout in seconds
-        
-    Returns:
-        List of readings from local containers
+    """Collect metrics from explicitly configured local runtimes.
+
+    Local discovery is config-driven only. Docker is reserved for packaging
+    and deployment and is not used as a discovery source.
     """
-    try:
-        import docker
-        client = docker.DockerClient(base_url=config.docker_socket)
-        containers = client.containers.list(all=True)
-    except Exception as exc:
-        LOGGER.warning("Docker container listing failed reason=%s", exc)
-        return []
-    
     readings: List[Reading] = []
-    for container in containers:
-        if not _matches_container_patterns(container.name, config.container_name_patterns):
+    for container_config in config.containers:
+        if not _matches_container_patterns(container_config.name, config.container_name_patterns):
             continue
-            
-        container_info = _container_info(container)
-        network_info = _container_networks(container)
-        log_counts = _container_log_counts(container, config.service.log_window_seconds)
-        
-        # Add basic container metrics
-        container_readings = _container_readings(container_info, network_info, log_counts)
-        readings.extend(container_readings)
-        
-        # Probe TequilAPI if enabled
+
+        host = container_config.host or config.local_host
+        port = container_config.tequilapi_port or config.api_default_port
+        host_info = _configured_runtime_info(container_config, host)
+
         if config.api_probe_enabled:
-            api_readings = await _probe_container_api(container, config, timeout_seconds, container_info, network_info)
-            readings.extend(api_readings)
-    
+            base_url = f"http://{host}:{port}"
+            readings.extend(await _probe_api(base_url, config, timeout_seconds, host_info))
+        else:
+            readings.extend(_container_readings(host_info, host_info["networks"], host_info["log_counts"]))
     return readings
+
+
+def _configured_runtime_info(container_config: MystContainerConfig, host: str) -> Dict[str, Any]:
+    return {
+        "name": container_config.name,
+        "container_name": container_config.name,
+        "host": host,
+        "running": None,
+        "status": "unknown",
+        "restart_count": 0,
+        "uptime_seconds": None,
+        "created_at": None,
+        "networks": [
+            {
+                "name": "host",
+                "ip_address": host,
+                "gateway": None,
+                "mac_address": None,
+            }
+        ],
+        "log_counts": {},
+        "warnings": ["configured_local_runtime"],
+    }
 
 
 async def _collect_remote_hosts(config: MystCollectorConfig, timeout_seconds: int) -> List[Reading]:
@@ -554,6 +558,20 @@ async def _probe_api(
             api_up = response.status_code == 200
     except Exception:
         api_up = False
+
+    host_info["running"] = api_up
+    host_info["status"] = "running" if api_up else "unreachable"
+    host_info["api"] = {
+        "up": api_up,
+        "metrics": {},
+        "endpoints": {
+            "healthcheck": {
+                "ok": api_up,
+                "status_code": 200 if api_up else None,
+            }
+        },
+        "status_code": 200 if api_up else None,
+    }
     
     readings.append(Reading(
         source_type="myst",
@@ -648,6 +666,13 @@ async def _fetch_api_endpoint(
     
     # Extract metrics from response
     metrics = _extract_metrics_from_response(data, endpoint_config.metric_prefix)
+    api = host_info.setdefault("api", {})
+    api.setdefault("metrics", {}).update(metrics)
+    api.setdefault("endpoints", {})[endpoint_config.name] = {
+        "ok": True,
+        "status_code": response.status_code,
+        "path": path,
+    }
     for metric_name, value in metrics.items():
         readings.append(Reading(
             source_type="myst",
