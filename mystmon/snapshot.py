@@ -38,24 +38,36 @@ def render_snmp_extend(snapshot: dict[str, Any]) -> str:
     ]
     mystnodes = snapshot.get("mystnodes") or {}
     if mystnodes:
+        accounts = mystnodes.get("accounts", [])
+        endpoint_count = len(mystnodes.get("endpoints", {}))
+        if not endpoint_count and accounts:
+            endpoint_count = sum(len((account.get("endpoints") or {})) for account in accounts if isinstance(account, dict))
+        authenticated = mystnodes.get("authenticated")
+        if authenticated is None and accounts:
+            authenticated = any(account.get("authenticated") for account in accounts if isinstance(account, dict))
         lines.extend(
             [
-                f"mystnodes.authenticated={1 if mystnodes.get('authenticated') else 0}",
-                f"mystnodes.endpoint_count={len(mystnodes.get('endpoints', {}))}",
+                f"mystnodes.authenticated={1 if authenticated else 0}",
+                f"mystnodes.endpoint_count={endpoint_count}",
             ]
         )
-        
-        # Handle multi-account structure
-        accounts = mystnodes.get("accounts", [])
+
         if accounts:
             lines.append(f"mystnodes.account_count={len(accounts)}")
             for account in accounts:
                 account_name = account.get("name", "unknown")
                 lines.append(f"mystnodes.account.{account_name}.authenticated={1 if account.get('authenticated') else 0}")
                 lines.append(f"mystnodes.account.{account_name}.endpoint_count={len(account.get('endpoints', {}))}")
-        
-        # Handle nodes
+
         nodes = mystnodes.get("nodes", [])
+        if not nodes and accounts:
+            for account in accounts:
+                endpoint_nodes = (((account.get("endpoints") or {}).get("nodes") or {}).get("data") or {}).get("nodes") or []
+                for node in endpoint_nodes:
+                    if isinstance(node, dict):
+                        merged = dict(node)
+                        merged.setdefault("account", account.get("name"))
+                        nodes.append(merged)
         lines.append(f"mystnodes.node_count={len(nodes)}")
         for node in nodes:
             prefix = sanitize_key(node.get("name", "unknown"))
