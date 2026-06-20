@@ -19,5 +19,5 @@ The main components are:
 - mystmon.collectors: Data collection implementations
 - mystmon.config: Configuration management
 """
-__version__ = "0.75.0-beta.3"
+__version__ = "0.1"
 __author__ = "Sundeep Goel"

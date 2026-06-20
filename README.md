@@ -4,206 +4,147 @@
 [![Version](https://img.shields.io/github/v/tag/sundeepgoel72/myst-monitor?label=version)](https://github.com/sundeepgoel72/myst-monitor/tags)
 [![Tests](https://img.shields.io/github/actions/workflow/status/sundeepgoel72/myst-monitor/test.yml?branch=main&label=tests)](https://github.com/sundeepgoel72/myst-monitor/actions/workflows/test.yml)
 
-WSL-first monitoring bridge for Mysterium nodes, with Docker reserved for final HP400 verification and live service deployment.
+MystMon is a read-only monitoring service for MYST nodes. It collects runtime and portal state, writes snapshots and CSV exports, exposes an HTTP API and Prometheus metrics, and supports a lightweight web UI for inspection.
 
-## Features
+## Core Capabilities
 
-- **Local Runtime Discovery**: Probes explicitly configured local MYST runtimes from WSL
-- **TequilAPI Monitoring**: Read-only monitoring of Mysterium node TequilAPI endpoints
-- **Prometheus Export**: Exposes container and API metrics in Prometheus format
-- **SNMP Extend**: Publishes node status via SNMP extend script
-- **Web UI**: Dashboard with fleet overview, history, and settings
-- **Telegram Reports**: Automated earnings and metric reports
-- **SQLite History**: Persistent storage of collection snapshots
-- **Multi-host Support**: Configured local runtimes plus remote TequilAPI hosts
+- Read-only TequilAPI monitoring for local and remote MYST runtimes
+- MystNodes portal collection for account, node, wallet, and runtime matching data
+- Snapshot and SQLite history storage with local-time timestamps driven by `service.timezone`
+- CSV exports for accounts, portal nodes, local runtimes, and local hosts
+- HTTP API, Prometheus metrics, and optional UI for operational inspection
 
-## TequilAPI Integration
+## Run From Published Docker Image
 
-MystMon implements comprehensive read-only monitoring of Mysterium node TequilAPI endpoints:
+Docker is for packaging and deployment only. It is not the day-to-day development or debugging path.
 
-- **Endpoint Discovery**: Automatically discovers supported endpoints via OpenAPI schema
-- **Safety Policy**: Enforces read-only access and blocks sensitive operations
-- **Data Redaction**: Aggressively redacts sensitive information
-- **Category Support**: Collects data from health, identities, services, sessions, provider stats, payments, location, NAT, and utilities
-- **Metrics Export**: Exports TequilAPI data as Prometheus metrics
-
-See [TEQUILAPI.md](docs/TEQUILAPI.md) for detailed documentation.
-
-## Quick Start
+Pull the published dev image:
 
 ```bash
-# Clone the repository
+docker pull ghcr.io/sundeepgoel72/mystmon:dev
+```
+
+Prepare config and data locally:
+
+```bash
+cp config.example.yaml config.yaml
+cp config.local.example.yaml config.local.yaml
+mkdir -p data
+```
+
+Run the container:
+
+```bash
+docker run -d \
+  --name mystmon-dev \
+  --restart unless-stopped \
+  -p 8072:8072 \
+  -e MYSTMON_DATA_DIR=/data/mystmon \
+  -e MYSTMON_CONFIG=/app/config.yaml \
+  -e MYSTMON_HOST=0.0.0.0 \
+  -e MYSTMON_PORT=8072 \
+  -e MYSTMON_TEQUILAPI_PASSWORD=your_tequilapi_password \
+  -e MYSTMON_SSH_PASSWORD=your_ssh_password \
+  -v "$PWD/config.yaml:/app/config.yaml:ro" \
+  -v "$PWD/config.local.yaml:/app/config.local.yaml:ro" \
+  -v "$PWD/data:/data/mystmon" \
+  ghcr.io/sundeepgoel72/mystmon:dev
+```
+
+Health check:
+
+```bash
+curl http://127.0.0.1:8072/health
+```
+
+Container outputs are written under `/data/mystmon` inside the container, backed by your mounted `data/` directory.
+
+## Configuration Model
+
+Tracked base config:
+- [config.example.yaml](config.example.yaml)
+
+Local override template:
+- [config.local.example.yaml](config.local.example.yaml)
+
+Runtime behavior:
+- copy `config.example.yaml` to `config.yaml` for your working config
+- copy `config.local.example.yaml` to `config.local.yaml` for host- or credential-specific overrides
+- keep secrets in environment variables or untracked local files
+
+Important configuration areas:
+- `service`: polling, paths, timezone
+- `myst`: local runtime and remote TequilAPI probe settings
+- `mystnodes_accounts`: MystNodes portal account configuration
+- `outputs`: latest snapshot, SNMP text, and CSV export paths
+- `history`: SQLite history storage
+- `telegram`, `ui`, `alerting`: optional service features
+
+## WSL Development Setup From Source
+
+WSL is the default environment for coding, testing, and debugging.
+
+```bash
 git clone https://github.com/sundeepgoel72/myst-monitor.git
 cd myst-monitor
-
-# Copy and customize the configuration
 cp config.example.yaml config.yaml
-# Edit config.yaml as needed
-
-# Optional: copy the local override sample for host-specific settings
 cp config.local.example.yaml config.local.yaml
-
-# Create or activate the local virtualenv on WSL
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/pip install -r requirements-dev.txt
+```
 
-# Run a focused verification check
-PYTHONPATH=/home/sundeep/projects/mystmon .venv/bin/pytest tests/test_release_validation.py -q
+Verify imports:
 
-# Verify the package imports on WSL
+```bash
 .venv/bin/python -c "import mystmon.api; print('ok')"
 ```
 
-## Current State
+## Testing And Validation
 
-- Day-to-day development and testing is now WSL-only at `/home/sundeep/projects/mystmon`.
-- Local discovery no longer uses Docker fallback. The collector probes `myst.containers[*].host` directly from WSL.
-- CSV export appends into the active `collection_*` file set instead of creating a new batch on every run.
-- Wallet state is stored through the main snapshot/history/export path and currently appears in `mystnodes_accounts.csv`.
-- `service.timezone` now controls rendered log timestamps and the persisted/exported `generated_at` / `collected_at` values used in snapshot, SQLite history, and CSV files.
-- Runtime snapshot rows are now deduplicated by host/container and enriched with portal account, identity, node name, and local-match data before history/export.
+Focused validation used in this repo:
 
-## Environment Model
+```bash
+PYTHONPATH=. .venv/bin/pytest tests/test_release_validation.py -q
+PYTHONPATH=. .venv/bin/pytest \
+  tests/test_release_validation.py \
+  tests/test_config.py \
+  tests/test_main.py \
+  tests/test_history.py \
+  tests/test_scheduler.py \
+  tests/test_export_csv.py \
+  tests/test_mystnodes_collector.py \
+  tests/test_myst_local_discovery.py -q
+```
 
-- All day-to-day development, debugging, linting, and test execution should happen on the WSL checkout at `/home/sundeep/projects/mystmon`.
-- Use a local virtualenv on WSL for Python work.
-- Docker on HP400 is reserved for final verification:
-  - `mystmon-dev` only when an explicit dev-container check is needed near the end
-  - `mystmon-prod` for the live service and final deployment validation
+Run the full suite:
 
-## Docker Modes
+```bash
+PYTHONPATH=. .venv/bin/pytest
+```
 
-- `docker-compose.yml` runs the image-based deployment container as `mystmon-prod`.
-- `docker-compose.dev.yml` pulls the published GHCR dev image as `mystmon-dev`.
-- Docker is not part of local discovery.
-- Local development runs the collector directly on WSL and writes snapshot/CSV outputs there.
-- HP400 `mystmon-prod` remains the final live-service verification target.
-- Published image source:
+Shell syntax validation for deployment helpers:
+
+```bash
+bash -n ops/build-on-linux.sh ops/install-remote.sh ops/validate-mystmon.sh
+```
+
+## Deployment Notes
+
+- Canonical branch: `main`
+- Current app version: `0.1`
+- Versioning rule: increment by `0.01` for each minor release
+- GHCR publish target:
   - `ghcr.io/sundeepgoel72/mystmon:dev` from pushes to `main`
-  - `ghcr.io/sundeepgoel72/mystmon:<version>` from release tags like `v0.1`
-  - versioning policy: start at `0.1` and increment by `0.01` for each minor release
-
-Canonical configuration:
-- [config.example.yaml](config.example.yaml) for the portable base config
-
-Optional local overrides:
-- [config.local.example.yaml](config.local.example.yaml) for direct MystNodes account credentials and host-specific overrides
-
-Environment file:
-- `.env` holds runtime/deploy variables and secrets such as the TequilAPI password and SSH password.
-- `.env.example` is the template for that file.
-- MystNodes portal credentials are no longer stored in `.env`; they live in YAML config.
-
-Key configuration areas:
-
-- **MYST Collection**: configured local runtime hosts, remote TequilAPI hosts, TequilAPI settings
-- **MystNodes**: one or more portal accounts in `mystnodes_accounts`
-- **Prometheus**: Target endpoints for additional metric collection
-- **SNMP**: Target hosts and OIDs for SNMP polling
-- **History**: SQLite database path and retention settings
-- **Telegram**: Bot token and chat ID for notifications
-- **UI**: Web interface settings and refresh intervals
-
-## TequilAPI Setup
-
-To enable TequilAPI monitoring:
-
-1. Configure TequilAPI to listen on a network-accessible address:
-   ```bash
-   myst config set tequilapi.address 0.0.0.0
-   ```
-
-2. Set up authentication credentials:
-   ```bash
-   myst config set tequilapi.auth.username myst
-   myst config set tequilapi.auth.password your_secure_password
-   ```
-
-3. Configure MystMon with the credentials:
-   ```yaml
-   myst:
-     api_username: "myst"
-     api_password_env: "MYSTMON_TEQUILAPI_PASSWORD"
-   ```
-
-4. Set the environment variable:
-   ```bash
-   export MYSTMON_TEQUILAPI_PASSWORD="your_secure_password"
-   ```
-
-## API
-
-See [API.md](docs/API.md) for API documentation.
-
-Key endpoints:
-
-- `GET /api/v1/snapshot` - Latest MYST container snapshot
-- `GET /metrics` - Prometheus metrics
-- `GET /api/v1/history/*` - Historical data
-- `POST /api/v1/collect` - Trigger immediate collection
-
-## Testing
-
-Run the test suite:
-
-```bash
-# Run all tests on WSL
-PYTHONPATH=/home/sundeep/projects/mystmon .venv/bin/pytest
-
-# Run focused backend tests on WSL
-PYTHONPATH=/home/sundeep/projects/mystmon .venv/bin/pytest tests/test_*.py
-
-# Run only frontend/UI tests with Playwright when needed
-PYTHONPATH=/home/sundeep/projects/mystmon .venv/bin/pytest -m ui
-
-# Run with coverage
-PYTHONPATH=/home/sundeep/projects/mystmon .venv/bin/pytest --cov=mystmon --cov-report=html
-```
-
-Operational note:
-- Run code and validation on WSL by default.
-- Do not use Docker containers for development testing or debugging unless explicitly requested.
-- Prefer a local virtualenv for test execution.
-- Use HP400 Docker only for final verification passes against `mystmon-dev` or `mystmon-prod`.
-
-Recent verified commands:
-
-```bash
-.venv/bin/python -c "import mystmon.api; print('ok')"
-PYTHONPATH=/home/sundeep/projects/mystmon .venv/bin/pytest tests/test_release_validation.py -q
-PYTHONPATH=/home/sundeep/projects/mystmon .venv/bin/pytest tests/test_myst_local_discovery.py tests/test_export_csv.py tests/test_scheduler.py tests/test_mystnodes_collector.py tests/test_config.py -q
-```
-
-Latest result:
-- focused backend set: `24 passed`
-- release validation: `1 passed, 1 skipped`
-- live local collection/export on WSL created:
-  - `data/collection_10_summary.csv`
-  - `data/collection_10_mystnodes_accounts.csv`
-  - `data/collection_10_mystnodes_portal_nodes.csv`
-  - `data/collection_10_mystnodes_local_runtime_nodes.csv`
-  - `data/collection_10_mystnodes_local_hosts.csv`
-  - `data/latest.json`
+  - `ghcr.io/sundeepgoel72/mystmon:<version>` from tags such as `v0.1`
+- If the package page shows stale metadata, check the latest `Publish Docker Image` workflow run first. GHCR metadata updates only after a successful image push.
 
 ## Documentation
 
-- [API.md](docs/API.md) - API endpoints and data structures
-- [TEQUILAPI.md](docs/TEQUILAPI.md) - TequilAPI integration details
-- [CONFIG.md](docs/CONFIG.md) - Configuration guide
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+- [docs/API.md](docs/API.md) - API surface and history endpoints
+- [docs/TEQUILAPI.md](docs/TEQUILAPI.md) - TequilAPI collection details
+- [docs/DESIGN.md](docs/DESIGN.md) - architecture and maintainer design notes
+- [.codex/HANDOVER.md](.codex/HANDOVER.md) - current maintainer handover for follow-on agents
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Beta Feedback
-
-For beta releases, please provide feedback in [issue #3](https://github.com/sundeepgoel72/myst-monitor/issues/3).
+This project is licensed under the MIT License. See [LICENSE](LICENSE).
