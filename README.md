@@ -1,7 +1,7 @@
 # MystMon
 
 [![License](https://img.shields.io/github/license/sundeepgoel72/myst-monitor)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/sundeepgoel72/myst-monitor)](https://github.com/sundeepgoel72/myst-monitor/releases)
+[![Version](https://img.shields.io/github/v/tag/sundeepgoel72/myst-monitor?label=version)](https://github.com/sundeepgoel72/myst-monitor/tags)
 [![Tests](https://img.shields.io/github/actions/workflow/status/sundeepgoel72/myst-monitor/test.yml?branch=main&label=tests)](https://github.com/sundeepgoel72/myst-monitor/actions/workflows/test.yml)
 
 WSL-first monitoring bridge for Mysterium nodes, with Docker reserved for final HP400 verification and live service deployment.
@@ -62,7 +62,7 @@ PYTHONPATH=/home/sundeep/projects/mystmon .venv/bin/pytest tests/test_release_va
 - CSV export appends into the active `collection_*` file set instead of creating a new batch on every run.
 - Wallet state is stored through the main snapshot/history/export path and currently appears in `mystnodes_accounts.csv`.
 - `service.timezone` now controls rendered log timestamps and the persisted/exported `generated_at` / `collected_at` values used in snapshot, SQLite history, and CSV files.
-- Current known issue: `latest.json` still stores one raw node entry per reading, so `snapshot["nodes"]` is inflated and should be deduplicated in the next pass.
+- Runtime snapshot rows are now deduplicated by host/container and enriched with portal account, identity, node name, and local-match data before history/export.
 
 ## Environment Model
 
@@ -81,7 +81,8 @@ PYTHONPATH=/home/sundeep/projects/mystmon .venv/bin/pytest tests/test_release_va
 - HP400 `mystmon-prod` remains the final live-service verification target.
 - Published image source:
   - `ghcr.io/sundeepgoel72/mystmon:dev` from pushes to `main`
-  - `ghcr.io/sundeepgoel72/mystmon:<version>` from release tags like `v0.75.0-beta.3`
+  - `ghcr.io/sundeepgoel72/mystmon:<version>` from release tags like `v0.1`
+  - versioning policy: start at `0.1` and increment by `0.01` for each minor release
 
 Canonical configuration:
 - [config.example.yaml](config.example.yaml) for the portable base config
