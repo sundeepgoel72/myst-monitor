@@ -1,166 +1,44 @@
 service:
   name: mystmon
   poll_interval_seconds: 21600
-  request_timeout_seconds: 10
-  data_dir: /data/mystmon
-  log_window_seconds: 21600
   timezone: Asia/Kolkata
 
+# Optional local MYST runtime discovery.
+# Leave disabled in the base sample unless you are also collecting local runtimes.
+#
+# The low-level API endpoint list is not shown here because the application already
+# carries safe defaults in code.
+myst:
+  enabled: false
+  api_probe_enabled: true
+  api_default_port: 4050
+  containers: []
+  remote_hosts: []
+
+outputs:
+  csv_export_path: /data/mystmon/csv
+
+mystnodes_accounts:
+  - account: your-myst-email@example.com
+    enabled: true
+    password: change-me
+    wallet_address: 0x1234567890abcdef1234567890abcdef12345678
+
+# Deferred sections for later use.
+# Keep these disabled unless you are explicitly enabling those features.
 prometheus:
-  enabled: true
+  enabled: false
   targets: []
 
 snmp:
   enabled: false
-  default_community: public
   targets: []
-
-myst:
-  enabled: true
-  local_host: 192.168.1.72
-  docker_socket: unix:///var/run/docker.sock
-  container_name_patterns:
-    - ^myst(\.|$)
-    - ^myst[0-9]
-  api_probe_enabled: true
-  api_default_port: 4050
-  api_username:
-  api_password_env:
-  api_endpoints:
-    - name: healthcheck
-      path: /healthcheck
-      metric_prefix: health
-      category: health
-    - name: identities
-      path: /identities
-      metric_prefix: identities
-      category: identities
-    - name: services
-      path: /services
-      metric_prefix: services
-      category: services
-    - name: sessions
-      path: /sessions
-      metric_prefix: sessions
-      category: sessions
-    - name: sessions_connectivity_status
-      path: /sessions-connectivity-status
-      metric_prefix: sessions
-      category: sessions
-    - name: sessions_stats_daily
-      path: /sessions/stats-daily
-      metric_prefix: sessions
-      category: sessions
-    - name: session_stats_aggregated
-      path: /sessions/stats-aggregated
-      metric_prefix: sessions
-      category: sessions
-    - name: provider_activity_stats
-      path: /node/provider/activity-stats
-      metric_prefix: provider
-      category: provider
-    - name: provider_quality
-      path: /node/provider/quality
-      metric_prefix: provider
-      category: provider
-    - name: provider_service_earnings
-      path: /node/provider/service-earnings
-      metric_prefix: provider
-      category: provider
-    - name: provider_sessions
-      path: /node/provider/sessions
-      metric_prefix: provider
-      category: provider
-    - name: provider_sessions_1d
-      path: /node/provider/sessions-count?range=1d
-      metric_prefix: provider_sessions_1d
-      category: provider
-    - name: provider_sessions_7d
-      path: /node/provider/sessions-count?range=7d
-      metric_prefix: provider_sessions_7d
-      category: provider
-    - name: provider_transferred_data
-      path: /node/provider/transferred-data
-      metric_prefix: provider
-      category: provider
-    - name: settlement_history
-      path: /settle/history
-      metric_prefix: settlements
-      category: settlements
-    - name: transactor_chains_summary
-      path: /transactor/chains-summary
-      metric_prefix: settlements
-      category: settlements
-    - name: transactor_fees
-      path: /transactor/fees
-      metric_prefix: payments
-      category: payments
-    - name: transactor_fees_v2
-      path: /v2/transactor/fees
-      metric_prefix: payments
-      category: payments
-    - name: config
-      path: /config
-      metric_prefix: config
-      category: config
-    - name: config_default
-      path: /config/default
-      metric_prefix: config
-      category: config
-    - name: location
-      path: /location
-      metric_prefix: location
-      category: location
-    - name: connection_location
-      path: /connection/location
-      metric_prefix: location
-      category: location
-    - name: connection_proxy_location
-      path: /connection/proxy/location
-      metric_prefix: location
-      category: location
-    - name: nat_type
-      path: /nat/type
-      metric_prefix: nat
-      category: nat
-  containers: []
-  remote_hosts: []
-
-mystnodes:
-  base_url: https://my.mystnodes.com
-
-mystnodes_accounts: []
-
-system:
-  enabled: true
-  collect_interval_seconds: 60
-
-outputs:
-  latest_json_path: /data/mystmon/latest.json
-  snmp_extend_path: /data/mystmon/snmp_extend.txt
-  csv_export_path: /data/mystmon/csv
-
-history:
-  enabled: true
-  db_path: /data/mystmon/mystmon.db
 
 telegram:
   enabled: false
-  bot_token_env: TELEGRAM_BOT_TOKEN
-  chat_id_env: TELEGRAM_CHAT_ID
-  report_time_local: "08:00"
-  timezone: Asia/Kolkata
-  disable_notification: false
 
 ui:
-  enabled: true
-  path: /ui
-  auto_refresh_interval_seconds: 30
-  max_history_points: 500
-  theme: system
-  enable_advanced_filtering: true
+  enabled: false
 
 alerting:
-  enabled: true
-  evaluation_interval_seconds: 60
-  notification_cooldown_seconds: 3600
+  enabled: false

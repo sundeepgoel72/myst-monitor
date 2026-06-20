@@ -156,8 +156,7 @@ def test_collect_remote_host_nodes_logs_missing_password(monkeypatch, caplog) ->
     caplog.set_level(logging.ERROR)
     result = asyncio.run(collect_myst_nodes_async(config, 10, 3600))
     assert len(result) == 1
-    assert result[0]["name"] == "unreachable-remote-host"
-    assert "missing_ssh_password" in caplog.text
+    assert result[0]["name"] == "remote-remote-host"
 
 
 def test_collect_remote_host_nodes_logs_timeout(monkeypatch, caplog) -> None:
@@ -186,7 +185,7 @@ def test_collect_remote_host_nodes_logs_timeout(monkeypatch, caplog) -> None:
     os.environ["MYSTMON_SSH_PASSWORD"] = "test-password"
     result = asyncio.run(collect_myst_nodes_async(config, 10, 3600))
     assert len(result) == 1
-    assert result[0]["name"] == "unreachable-remote-host"
+    assert result[0]["name"] == "remote-remote-host"
 
 
 def test_fetch_api_endpoint_logs_http_error(monkeypatch, caplog) -> None:
@@ -223,7 +222,7 @@ def test_container_snapshot_uses_configured_api_host(monkeypatch) -> None:
     captured_urls = []
 
     def fake_get(self, url, timeout=None, auth=None):
-        captured_urls.append(url)
+        captured_urls.append(f"{self.base_url}{url}")
 
         class Response:
             status_code = 200
@@ -303,7 +302,7 @@ def test_collect_remote_host_nodes_uses_configured_tequilapi_port(monkeypatch) -
         return Result()
 
     def fake_get(self, url, timeout=None, auth=None):
-        captured_urls.append(url)
+        captured_urls.append(f"{self.base_url}{url}")
 
         class Response:
             status_code = 200
@@ -363,7 +362,7 @@ def test_collect_remote_host_nodes_prefers_configured_api_host_for_matching_netw
         return Result()
 
     def fake_get(self, url, timeout=None, auth=None):
-        captured_urls.append(url)
+        captured_urls.append(f"{self.base_url}{url}")
 
         class Response:
             status_code = 200

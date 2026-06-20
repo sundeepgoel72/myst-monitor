@@ -1,0 +1,3 @@
+function createLineChart() {
+    return null;
+}

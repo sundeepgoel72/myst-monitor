@@ -35,19 +35,18 @@ After pulling the image, create these local files:
 
 ```bash
 cp config.example.yaml config.yaml
-cp config.local.example.yaml config.local.yaml
 mkdir -p data
 ```
 
-Configuration files:
+Use only one runtime config file: `config.yaml`.
+If an older `config.local.yaml` is still present from a previous setup, remove it and consolidate any needed settings into `config.yaml`.
+`.env` is not part of the normal runtime flow.
+
+Configuration file:
 - `config.yaml`
-  - your active base runtime config
+  - your active runtime config
   - copied from `config.example.yaml`
-  - use this for shared settings such as polling interval, output paths, timezone, and feature enablement
-- `config.local.yaml`
-  - optional local override file
-  - copied from `config.local.example.yaml`
-  - use this for host-specific values, local credentials, or environment-specific overrides
+  - use this for timezone, output paths, MystNodes portal accounts, and optional local runtime discovery settings
 
 Key configuration areas to review before first run:
 - `service`
@@ -62,7 +61,6 @@ Key configuration areas to review before first run:
 Typical config flow:
 - set `service.timezone` to your operational timezone
 - add your MystNodes portal accounts under `mystnodes_accounts`
-- keep secrets in environment variables or untracked local files
 
 Example snippet:
 
@@ -94,7 +92,6 @@ services:
       MYSTMON_PORT: 8072
     volumes:
       - ./config.yaml:/app/config.yaml:ro
-      - ./config.local.yaml:/app/config.local.yaml:ro
       - ./data:/data/mystmon
 ```
 
@@ -105,6 +102,8 @@ docker compose up -d
 ```
 
 The password environment variables are not part of the simple `0.1` example because they are only needed when your specific configuration actually uses them.
+
+The root-level `.env` file from older deployment flows is obsolete and should not be used for a normal `0.1` install.
 
 Health check:
 
@@ -128,6 +127,7 @@ For source-based setup, testing, and developer workflow, see [docs/DEVELOPMENT.m
 ## Documentation
 
 - [docs/API.md](docs/API.md) - API surface and history endpoints
+- [docs/CONVENTIONS.md](docs/CONVENTIONS.md) - contributor and in-file review comment conventions
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) - source setup and developer validation
 - [docs/TEQUILAPI.md](docs/TEQUILAPI.md) - TequilAPI collection details
 - [docs/DESIGN.md](docs/DESIGN.md) - architecture and maintainer design notes

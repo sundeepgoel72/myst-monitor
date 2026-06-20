@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}{{ service_name }}{% endblock %}</title>
+    <script>
+        if (!window.crypto) { window.crypto = {}; }
+        if (!window.crypto.randomUUID) {
+            window.crypto.randomUUID = function () {
+                return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                    const r = Math.random() * 16 | 0;
+                    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                    return v.toString(16);
+                });
+            };
+        }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body data-ui-path="{{ ui_path }}">
+    <header>
+        <div>
+            <strong>{{ service_name }}</strong>
+            <span id="service-version">{{ version }}</span>
+            <span id="last-update">Last updated: Never</span>
+        </div>
+        <nav>
+            <a href="{{ ui_path }}">Dashboard</a>
+            <a href="{{ ui_path }}/fleet">Fleet</a>
+            <a href="{{ ui_path }}/history">History</a>
+            <a href="{{ ui_path }}/settings">Settings</a>
+        </nav>
+    </header>
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+    <script src="{{ ui_path }}/static/js/utils.js"></script>
+    <script src="{{ ui_path }}/static/js/api.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

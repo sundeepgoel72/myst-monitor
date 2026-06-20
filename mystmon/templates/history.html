@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}History - {{ service_name }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div>
+        <h1>History &amp; Trends</h1>
+        <p>Historical collection trends and comparisons.</p>
+    </div>
+    <div id="history-summary">Loading...</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ ui_path }}/static/js/history.js"></script>
+{% endblock %}

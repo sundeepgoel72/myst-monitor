@@ -93,12 +93,12 @@ def test_wallet_balance_endpoint_uses_configured_wallet_address(monkeypatch) -> 
     monkeypatch.setattr("mystmon.collectors.mystnodes._fetch_wallet_state", fake_fetch_wallet_state)
 
     endpoint = MystNodesPortalEndpointConfig(name="wallet_balance", path="/api/v2/node/balance")
-    config = MystNodesPortalAccountConfig(wallet_address="0x9A183F79b7b803DF658DB0aC6159f0016e9db4bE")
+    config = MystNodesPortalAccountConfig(wallet_address="0x1111111111111111111111111111111111111111")
 
     result = asyncio.run(_fetch_endpoint(object(), config, endpoint, {}))
 
     assert result is not None
-    assert captured["wallet_address"] == "0x9A183F79b7b803DF658DB0aC6159f0016e9db4bE"
+    assert captured["wallet_address"] == "0x1111111111111111111111111111111111111111"
     assert result["ok"] is True
     assert result["data"]["summary"] == "$60.02 across 2 Chains"
 

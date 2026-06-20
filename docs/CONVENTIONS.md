@@ -1,6 +1,6 @@
 # MystMon Coding Conventions
 
-These conventions are for Codex, Aider, and other coding agents working in this repository.
+These conventions are for contributors and coding agents working in this repository.
 
 ## Unknown Monitoring Values
 
@@ -15,16 +15,22 @@ Examples:
 
 Docker `running` is local health state only. It does not imply portal `online`, earnings, quality, or portal uptime.
 
-Deploy flow:
+## Review Comment Convention
 
-- Start `mystmon-registry` before build/test/deploy work if the workflow needs the auxiliary registry.
-- Stop `mystmon-registry` after the deploy/test step completes.
+When leaving review or rewrite comments directly in files, wrap them in `<<` and `>>`.
 
-## Aider Run
+Examples:
 
-- Read `CONVENTIONS.md` and `.codex/HANDOVER.md` before making changes.
+- `<<rewrite this section for operators>>`
+- `<<check whether this field is still exported>>`
+- `<<remove if no longer used in 0.1>>`
+
+After acting on a comment, remove the marker from the file.
+
+## Development Flow
+
 - Keep changes scoped to the current issue and avoid rewriting unrelated history.
 - Run the smallest relevant checks first, then full validation before reporting done.
 - Prefer the repo's deploy scripts and release notes over ad hoc container commands.
-- Use local host execution for validation and debugging unless the user explicitly asks for Docker/container execution.
+- Use local host execution for validation and debugging unless Docker execution is explicitly requested.
 - For tests, prefer a local virtualenv or local host Python. Do not use a container test harness unless explicitly requested.

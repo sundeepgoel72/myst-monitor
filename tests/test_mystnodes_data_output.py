@@ -144,7 +144,12 @@ def test_mystnodes_data_account_provenance() -> None:
     finally:
         mystnodes_module.collect_mystnodes_portal_account = original
 
-    # Verify nodes include account provenance
-    account_names = {node["account"] for node in result["nodes"]}
+    # Verify nodes include account provenance across returned account payloads.
+    account_names = {
+        account["name"]
+        for account in result
+        for node in account["endpoints"]["nodes"]["data"]["nodes"]
+        if node
+    }
     assert "account-a" in account_names
     assert "account-b" in account_names

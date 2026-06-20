@@ -85,6 +85,14 @@ SAFE_ENDPOINTS = {
     "/nat/type",
 }
 
+# Backward-compatible alias retained for older tests and call sites.
+BLOCKED_PATHS = BLOCKED_ENDPOINTS | {
+    "/identities/{id}/unlock",
+    "/settle/withdraw",
+    "/settle/pay",
+    "/bug-report",
+}
+
 # Default metrics to collect if no endpoints are configured
 DEFAULT_ENDPOINTS = [
     {"name": "healthcheck", "path": "/healthcheck", "metric_prefix": "health"},
@@ -97,6 +105,137 @@ DEFAULT_ENDPOINTS = [
     {"name": "location", "path": "/location", "metric_prefix": "location"},
     {"name": "nat_type", "path": "/nat/type", "metric_prefix": "nat"},
 ]
+
+
+def _api_auth(config: MystCollectorConfig) -> tuple[str, str] | None:
+    import os
+
+    if not config.api_username or not config.api_password_env:
+        return None
+    password = os.getenv(config.api_password_env)
+    if not password:
+        return None
+    return (config.api_username, password)
+
+
+def _contains_sensitive_data(value: str) -> bool:
+    lower_value = value.lower()
+    if "0x" in lower_value and re.search(r"0x[a-f0-9]{40}", lower_value):
+        # Public wallet addresses are not sensitive by themselves.
+        if re.fullmatch(r".*0x[a-f0-9]{40}.*", lower_value) and "address:" in lower_value:
+            return False
+    sensitive_keywords = (
+        "password",
+        "secret",
+        "token",
+        "private",
+        "key",
+        "mnemonic",
+        "wallet",
+        "hash",
+        "private_key",
+        "secret_token",
+    )
+    if any(keyword in lower_value for keyword in sensitive_keywords):
+        return True
+    return bool(re.search(r"[a-z0-9]{32,}", lower_value))
+
+
+def _redact_api_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        for key, nested_value in value.items():
+            if _contains_sensitive_data(str(key)):
+                redacted[key] = "***REDACTED***"
+            else:
+                redacted[key] = _redact_api_value(nested_value)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_api_value(item) for item in value]
+    if isinstance(value, str) and _contains_sensitive_data(value):
+        return "***REDACTED***"
+    return value
+
+
+def _node_display_name(container_name: str, api_probe: dict[str, Any] | None) -> str:
+    if api_probe:
+        identity = api_probe.get("identity")
+        if identity:
+            return str(identity)
+        labels = api_probe.get("labels") or {}
+        if labels.get("identity_id"):
+            return str(labels["identity_id"])
+    return container_name
+
+
+def extract_api_metrics(endpoint_name: str, category: str, data: Any) -> dict[str, Any]:
+    metrics: dict[str, float] = {}
+    labels: dict[str, str] = {}
+
+    if category == "health" and isinstance(data, dict):
+        uptime = data.get("uptime")
+        if isinstance(uptime, str):
+            metrics["health_uptime_seconds"] = float(_parse_duration_to_seconds(uptime))
+        version = data.get("version")
+        if version is not None:
+            labels["health_version"] = str(version)
+        build_info = data.get("build_info")
+        if isinstance(build_info, dict):
+            if build_info.get("commit") is not None:
+                labels["health_build_commit"] = str(build_info["commit"])
+    elif category == "identities" and isinstance(data, dict):
+        identities = data.get("identities")
+        if isinstance(identities, list):
+            metrics["identities_count"] = float(len(identities))
+    elif category == "services" and isinstance(data, dict):
+        services = data.get("services")
+        if isinstance(services, list):
+            metrics["services_count"] = float(len(services))
+            metrics["services_running_count"] = float(sum(1 for item in services if isinstance(item, dict) and item.get("running")))
+    elif category == "sessions" and isinstance(data, dict):
+        for key, value in data.items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                metrics[f"sessions_{key}"] = float(value)
+    elif category == "provider" and isinstance(data, dict):
+        for key, value in data.items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                metrics[f"provider_{key}"] = float(value)
+    elif category == "payments" and isinstance(data, dict):
+        for key, value in data.items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                metrics[f"payments_{key}"] = float(value)
+    elif category == "location" and isinstance(data, dict):
+        for key, value in data.items():
+            labels[f"location_{key}"] = str(value)
+    elif category == "nat":
+        labels["nat"] = str(data)
+    else:
+        metrics.update(_extract_metrics_from_response(data, category))
+
+    return {"metrics": metrics, "labels": labels}
+
+
+def _parse_duration_to_seconds(value: str) -> int:
+    total = 0
+    for amount, unit in re.findall(r"(\d+)([hms])", value):
+        if unit == "h":
+            total += int(amount) * 3600
+        elif unit == "m":
+            total += int(amount) * 60
+        else:
+            total += int(amount)
+    return total
+
+
+def summarize_logs(log_text: str) -> dict[str, int]:
+    lower_text = log_text.lower()
+    lines = [line for line in lower_text.splitlines() if line.strip()]
+    return {
+        "error_or_warning": sum(1 for line in lines if "[error]" in line or "[warn]" in line),
+        "promise": sum(1 for line in lines if "promise" in line),
+        "session": sum(1 for line in lines if "session" in line),
+        "identity_warning": sum(1 for line in lines if "password or unlock" in line),
+    }
 
 
 async def collect_myst(
@@ -525,3 +664,134 @@ def _decode_api_response(response: httpx.Response) -> Any:
         return response.json()
     except ValueError:
         return response.text
+
+
+async def _fetch_api_endpoint_async(
+    base_url: str,
+    endpoint_config,
+    auth: tuple[str, str] | None,
+    source_name: str,
+    enabled: bool,
+) -> dict[str, Any]:
+    if not enabled:
+        return {"ok": False, "error": "disabled"}
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{base_url}{endpoint_config.path}", auth=auth)
+            response.raise_for_status()
+            return {"ok": True, "status_code": response.status_code, "data": _decode_api_response(response)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "source_name": source_name}
+
+
+async def _probe_api_async(
+    host: str,
+    source_name: str,
+    ports: dict[str, Any],
+    config: MystCollectorConfig,
+) -> dict[str, Any]:
+    host_port = config.api_default_port
+    port_entries = ports.get("4050/tcp") if isinstance(ports, dict) else None
+    if isinstance(port_entries, list) and port_entries:
+        host_port = int(port_entries[0].get("HostPort") or config.api_default_port)
+    base_url = f"http://{host}:{host_port}"
+    auth = _api_auth(config)
+    result: dict[str, Any] = {
+        "enabled": config.api_probe_enabled,
+        "up": False,
+        "auth": auth is not None,
+        "schema_available": False,
+        "endpoints": {},
+        "metrics": {},
+        "labels": {},
+        "management": {},
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            health = await client.get(f"{base_url}/healthcheck", auth=auth)
+            result["up"] = health.status_code == 200
+    except Exception:
+        return result
+    if not result["up"]:
+        return result
+
+    endpoints = config.api_endpoints or _create_default_endpoints()
+    for endpoint in endpoints:
+        if endpoint.path in BLOCKED_ENDPOINTS or endpoint.path in SKIPPED_ENDPOINTS:
+            continue
+        endpoint_result = await _fetch_api_endpoint_async(base_url, endpoint, auth, source_name, True)
+        result["endpoints"][endpoint.name] = endpoint_result
+        if endpoint_result.get("ok"):
+            data = endpoint_result.get("data")
+            category = getattr(endpoint, "category", None) or endpoint.metric_prefix
+            extracted = extract_api_metrics(endpoint.name, category, data)
+            result["metrics"].update(extracted["metrics"])
+            result["labels"].update(extracted["labels"])
+            result["management"].setdefault(category, {})[endpoint.name] = _redact_api_value(data)
+            if endpoint.name == "identities" and isinstance(data, dict):
+                identities = data.get("identities")
+                if isinstance(identities, list) and identities and isinstance(identities[0], dict):
+                    result["identity"] = identities[0].get("id")
+    return result
+
+
+def _tequilapi_summary(api_probe: dict[str, Any]) -> dict[str, Any]:
+    summary: dict[str, Any] = {"identity": api_probe.get("identity")}
+    management = api_probe.get("management") or {}
+
+    location = (((management.get("location") or {}).get("location")) or {})
+    if isinstance(location, dict):
+        if location.get("ip") is not None:
+            summary["public_ip"] = location.get("ip")
+
+    nat = ((management.get("nat") or {}).get("nat_type")) or {}
+    if isinstance(nat, dict):
+        summary["nat_type"] = nat.get("type")
+    elif nat is not None:
+        summary["nat_type"] = nat
+
+    services = ((management.get("services") or {}).get("services")) or {}
+    if isinstance(services, dict):
+        if services.get("count") is not None:
+            summary["services_count"] = float(services["count"])
+        if services.get("running_count") is not None:
+            summary["services_running"] = float(services["running_count"])
+
+    sessions = (management.get("sessions") or {})
+    active = ((sessions.get("sessions") or {}).get("daily") or {}).get("count")
+    if active is not None:
+        summary["sessions_active"] = float(active)
+    sessions_1d = ((sessions.get("session_stats_aggregated") or {}).get("daily") or {}).get("count")
+    if sessions_1d is not None:
+        summary["sessions_1d"] = float(sessions_1d)
+
+    provider = ((management.get("provider") or {}).get("provider_quality")) or {}
+    if isinstance(provider, dict) and provider.get("quality") is not None:
+        summary["provider_quality"] = float(provider["quality"])
+
+    payments = ((management.get("payments") or {}).get("transactor_fees_v2")) or {}
+    human = ((((payments.get("current") or {}).get("settlement")) or {}).get("human")) if isinstance(payments, dict) else None
+    if human is not None:
+        summary["wallet_balance"] = human
+
+    return summary
+
+
+async def _collect_myst_nodes_async(config: MystCollectorConfig, timeout_seconds: int, log_window_seconds: int) -> list[dict[str, Any]]:
+    readings = await collect_myst(config, timeout_seconds)
+    nodes: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for reading in readings:
+        raw = reading.raw_data or {}
+        key = str(raw.get("host") or raw.get("container_name") or reading.source_name)
+        if key in seen:
+            continue
+        seen.add(key)
+        node = dict(raw)
+        node.setdefault("name", reading.source_name)
+        nodes.append(node)
+    return nodes
+
+
+async def collect_myst_nodes_async(config: MystCollectorConfig, timeout_seconds: int, log_window_seconds: int) -> list[dict[str, Any]]:
+    return await _collect_myst_nodes_async(config, timeout_seconds, log_window_seconds)

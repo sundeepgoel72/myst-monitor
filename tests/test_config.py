@@ -49,12 +49,10 @@ def test_mystnodes_accounts_default_to_empty() -> None:
     assert config.mystnodes_accounts == []
 
 
-def test_local_config_overrides_tracked_config(tmp_path) -> None:
+def test_load_config_uses_single_file_only(tmp_path) -> None:
     config_file = tmp_path / "config.yaml"
-    local_file = tmp_path / "config.local.yaml"
-    config_file.write_text("service:\n  name: file-config\n", encoding="utf-8")
-    local_file.write_text(
-        'mystnodes_accounts:\n  - account: "account-a"\n    password: "secret"\n',
+    config_file.write_text(
+        'service:\n  name: file-config\nmystnodes_accounts:\n  - account: "account-a"\n    password: "secret"\n',
         encoding="utf-8",
     )
 

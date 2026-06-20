@@ -51,14 +51,17 @@ def test_deploy_scripts_wait_for_healthcheck() -> None:
     ps1_build = open(os.path.join(root, "ops", "build-on-linux.ps1"), encoding="utf-8").read()
 
     assert "healthcheck:" in compose
-    assert "image: mystmon:local" in compose
-    assert "container_name: mystmon-prod" in compose
+    assert "ghcr.io/sundeepgoel72/mystmon:0.1" in compose
+    assert "container_name: mystmon" in compose
     assert "ports:" in compose
     assert "healthcheck:" in dev_compose
     assert "container_name: mystmon-dev" in dev_compose
     assert "MYSTMON_SKIP_PULL" in bash_install
     assert "MYSTMON_SKIP_PULL" in bash_build
     assert "MYSTMON_SKIP_PULL" in ps1_build
-    assert "docker inspect -f '{{.State.Health.Status}}' mystmon-prod" in bash_install
-    assert "docker inspect -f '{{.State.Health.Status}}' mystmon-prod" in bash_build
-    assert "docker inspect -f '{{.State.Health.Status}}' mystmon-prod" in ps1_build
+    assert "docker inspect -f '{{.State.Health.Status}}' mystmon" in bash_install
+    assert "docker inspect -f '{{.State.Health.Status}}' mystmon" in bash_build
+    assert "docker inspect -f '{{.State.Health.Status}}' mystmon" in ps1_build
+    assert "test -f config.yaml" in bash_install
+    assert "test -f config.yaml" in bash_build
+    assert "test -f config.yaml" in ps1_build

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - {{ service_name }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div>
+        <h1>Settings</h1>
+        <p>Collector and runtime configuration view.</p>
+    </div>
+    <section>
+        <h2>UI</h2>
+        <dl id="ui-config"></dl>
+    </section>
+    <section>
+        <h2>Collectors</h2>
+        <table>
+            <tbody id="collectors-body"></tbody>
+        </table>
+    </section>
+    <section>
+        <h2>System</h2>
+        <pre id="config-json"></pre>
+        <pre id="collectors-config-json"></pre>
+        <pre id="portal-config-json"></pre>
+        <div id="wallet-address"></div>
+    </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ ui_path }}/static/js/settings.js"></script>
+{% endblock %}

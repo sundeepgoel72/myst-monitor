@@ -7,7 +7,7 @@ cd "$ROOT_DIR"
 PYTHON_BIN="${PYTHON_BIN:-.venv/bin/python}"
 DATA_DIR="${MYSTMON_DATA_DIR:-/tmp/mystmon-data}"
 LOG_LEVEL="${MYSTMON_LOG_LEVEL:-DEBUG}"
-CONFIG_FILE="${MYSTMON_CONFIG_FILE:-config.local.yaml}"
+CONFIG_FILE="${MYSTMON_CONFIG_FILE:-config.yaml}"
 
 PYTHONPATH=. MYSTMON_DATA_DIR="$DATA_DIR" MYSTMON_LOG_LEVEL="$LOG_LEVEL" "$PYTHON_BIN" - <<'PY'
 import asyncio
@@ -23,7 +23,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 
-config = load_config(os.getenv("MYSTMON_CONFIG_FILE", "config.local.yaml"))
+config = load_config(os.getenv("MYSTMON_CONFIG_FILE", "config.yaml"))
 
 
 def _fmt(value):

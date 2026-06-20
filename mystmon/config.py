@@ -387,9 +387,6 @@ def load_config(path: str | os.PathLike[str] | None = None) -> MystMonConfig:
     if raw is None:
         return MystMonConfig()
 
-    local_override = config_path.with_name("config.local.yaml")
-    if local_override != config_path:
-        raw = _deep_merge_dicts(raw, _load_yaml_file(local_override) or {})
     config = MystMonConfig.model_validate(raw)
     _validate_required_config(config)
     return config
@@ -400,13 +397,3 @@ def _load_yaml_file(path: Path) -> dict[str, Any] | None:
         return None
     with path.open("r", encoding="utf-8") as handle:
         return yaml.safe_load(handle) or {}
-
-
-def _deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(base)
-    for key, value in override.items():
-        if isinstance(merged.get(key), dict) and isinstance(value, dict):
-            merged[key] = _deep_merge_dicts(merged[key], value)
-        else:
-            merged[key] = value
-    return merged
