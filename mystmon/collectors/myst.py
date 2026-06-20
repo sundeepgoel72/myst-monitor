@@ -1,27 +1,19 @@
-"""Mysterium node collector for retrieving metrics from TequilAPI endpoints.
-
-This module provides functionality to collect metrics from Mysterium nodes
-using both local Docker discovery and portal-derived information. It handles
-explicit host-based TequilAPI probing and metric collection from various endpoints.
-"""
+"""Mysterium node collector for retrieving metrics from TequilAPI endpoints."""
 
 from __future__ import annotations
 
-import asyncio
 import base64
-import json
 import logging
 import re
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Set, Tuple
+from datetime import datetime
+from typing import Any, Dict, List
 
 import httpx
 
 from mystmon.config import (
-    MystCollectorConfig, 
-    MystContainerConfig, 
+    MystCollectorConfig,
     MystRemoteHostConfig,
-    TequilApiEndpointConfig
+    TequilApiEndpointConfig,
 )
 from mystmon.storage import Reading
 
@@ -40,7 +32,6 @@ BLOCKED_ENDPOINTS = {
     "/connection/manual",
     "/connection/shutdown",
     "/connection/location",
-    "/nat/type",
     "/config/user",
     "/config/set",
     "/identities/create",
@@ -55,6 +46,16 @@ BLOCKED_ENDPOINTS = {
     "/transactor/payments",
     "/pilvytis/api/v1/order",
     "/pilvytis/api/v1/payment",
+}
+
+# These endpoints are configured in older repo defaults but are not usable on
+# the currently observed node versions. Skip them to avoid noisy collection
+# errors until a version-specific implementation is added.
+SKIPPED_ENDPOINTS = {
+    "/node/provider/sessions",
+    "/node/provider/transferred-data",
+    "/settle/history",
+    "/transactor/chains-summary",
 }
 
 # Endpoints that are safe to call for metrics collection
@@ -98,30 +99,25 @@ DEFAULT_ENDPOINTS = [
 ]
 
 
-async def collect_myst(config: MystCollectorConfig, timeout_seconds: int) -> List[Reading]:
-    """Collect metrics from Mysterium nodes using both local and remote discovery.
-    
-    Args:
-        config: Collector configuration
-        timeout_seconds: Request timeout in seconds
-        
-    Returns:
-        List of readings from all nodes
-    """
+async def collect_myst(
+    config: MystCollectorConfig,
+    timeout_seconds: int,
+    portal_nodes: List[Dict[str, Any]] | None = None,
+) -> List[Reading]:
+    """Collect metrics from Mysterium nodes."""
     readings: List[Reading] = []
-    
-    # Collect from local Docker containers
-    local_readings = await _collect_local_containers(config, timeout_seconds)
+
+    # Portal-derived local runtime discovery is the preferred runtime path.
+    local_readings = await _collect_portal_runtime_nodes(config, timeout_seconds, portal_nodes or [])
     readings.extend(local_readings)
-    
-    # Collect from configured containers
-    configured_readings = await _collect_configured_containers(config, timeout_seconds)
-    readings.extend(configured_readings)
-    
-    # Collect from portal-derived remote hosts
+
+    # Configured hosts are kept only as a compatibility fallback when portal
+    # inventory is unavailable.
+    if not local_readings and not portal_nodes:
+        readings.extend(await _collect_configured_containers(config, timeout_seconds))
+
     remote_readings = await _collect_remote_hosts(config, timeout_seconds)
     readings.extend(remote_readings)
-    
     return readings
 
 
@@ -171,40 +167,39 @@ def render_myst_snapshot(snapshot: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-async def _collect_local_containers(config: MystCollectorConfig, timeout_seconds: int) -> List[Reading]:
-    """Collect metrics from local Docker containers.
-    
-    Args:
-        config: Collector configuration
-        timeout_seconds: Request timeout in seconds
-        
-    Returns:
-        List of readings from local containers
-    """
-    try:
-        import aiodocker
-    except ImportError:
-        LOGGER.info("aiodocker not available, skipping local container collection")
-        return []
-    
-    if not config.enabled:
-        return []
-    
-    try:
-        async with aiodocker.Docker() as docker:
-            containers = await docker.containers.list(all=True)
-    except Exception as exc:
-        LOGGER.warning("Docker container listing failed reason=%s", exc)
-        return []
-    
+async def _collect_portal_runtime_nodes(
+    config: MystCollectorConfig,
+    timeout_seconds: int,
+    portal_nodes: List[Dict[str, Any]],
+) -> List[Reading]:
     readings: List[Reading] = []
-    for container in containers:
-        try:
-            container_readings = await _collect_container(container, config, timeout_seconds, docker)
-            readings.extend(container_readings)
-        except Exception:
-            LOGGER.exception("Container collection failed name=%s", container.name)
-    
+    seen_hosts: set[str] = set()
+    for portal_node in portal_nodes:
+        if not isinstance(portal_node, dict):
+            continue
+        host = str(portal_node.get("localIp") or "").strip()
+        identity = str(portal_node.get("identity") or "").strip()
+        if not host or host in seen_hosts:
+            continue
+        seen_hosts.add(host)
+        node_name = str(portal_node.get("name") or identity or host)
+        host_info = {
+            "name": node_name,
+            "container_name": node_name,
+            "host": host,
+            "running": None,
+            "status": "unknown",
+            "restart_count": 0,
+            "uptime_seconds": None,
+            "networks": [{"name": "host", "ip_address": host, "gateway": None}],
+            "log_counts": {},
+            "portal_identity": identity,
+            "portal_node_name": node_name,
+            "warnings": [],
+        }
+        base_url = f"http://{host}:{config.api_default_port}"
+        probe_readings = await _probe_api(base_url, config, timeout_seconds, host_info)
+        readings.extend(probe_readings)
     return readings
 
 
@@ -253,102 +248,8 @@ async def _collect_remote_hosts(config: MystCollectorConfig, timeout_seconds: in
     return readings
 
 
-async def _collect_container(container, config: MystCollectorConfig, timeout_seconds: int, docker) -> List[Reading]:
-    """Collect metrics from a single Docker container.
-    
-    Args:
-        container: Docker container object
-        config: Collector configuration
-        timeout_seconds: Request timeout in seconds
-        docker: Docker client
-        
-    Returns:
-        List of readings from the container
-    """
-    name = container.name
-    if not _matches_patterns(name, config.container_name_patterns):
-        return []
-    
-    info = await container.show()
-    container_info = {
-        "name": name,
-        "container_name": name,
-        "running": info["State"]["Running"],
-        "status": info["State"]["Status"],
-        "restart_count": int(info["RestartCount"]),
-        "uptime_seconds": _uptime_seconds(info),
-        "networks": _networks(info),
-        "log_counts": {},
-    }
-    
-    # Collect logs if container is running
-    if container_info["running"]:
-        try:
-            logs = await container.log(stdout=True, stderr=True, tail=1000)
-            container_info["log_counts"] = _count_log_events(logs)
-        except Exception:
-            LOGGER.warning("Log collection failed name=%s", name)
-    
-    timestamp = datetime.now()
-    readings: List[Reading] = []
-    
-    # Add basic container readings
-    readings.append(Reading(
-        source_type="myst",
-        source_name=name,
-        metric_name="running",
-        value=1.0 if container_info["running"] else 0.0,
-        labels={},
-        timestamp=timestamp,
-        raw_data=container_info,
-    ))
-    
-    readings.append(Reading(
-        source_type="myst",
-        source_name=name,
-        metric_name="restart_count",
-        value=float(container_info["restart_count"]),
-        labels={},
-        timestamp=timestamp,
-        raw_data=container_info,
-    ))
-    
-    if container_info["uptime_seconds"] is not None:
-        readings.append(Reading(
-            source_type="myst",
-            source_name=name,
-            metric_name="uptime_seconds",
-            value=container_info["uptime_seconds"],
-            labels={},
-            timestamp=timestamp,
-            raw_data=container_info,
-        ))
-    
-    # Add log count readings
-    for event, count in container_info["log_counts"].items():
-        readings.append(Reading(
-            source_type="myst",
-            source_name=name,
-            metric_name=f"log_{event}",
-            value=float(count),
-            labels={},
-            timestamp=timestamp,
-            raw_data=container_info,
-        ))
-    
-    # Probe TequilAPI if enabled
-    if config.api_probe_enabled and container_info["running"]:
-        host = _container_host(info, config.local_host)
-        port = _container_port(info, config.api_default_port)
-        base_url = f"http://{host}:{port}"
-        api_readings = await _probe_api(base_url, config, timeout_seconds, container_info)
-        readings.extend(api_readings)
-    
-    return readings
-
-
 async def _collect_configured_container(
-    container_config: MystContainerConfig,
+    container_config,
     collector_config: MystCollectorConfig,
     timeout_seconds: int,
 ) -> List[Reading]:
@@ -372,12 +273,13 @@ async def _collect_configured_container(
         "name": name,
         "container_name": name,
         "host": host,
-        "running": True,
-        "status": "configured",
+        "running": None,
+        "status": "unknown",
         "restart_count": 0,
         "uptime_seconds": None,
-        "networks": [],
+        "networks": [{"name": "host", "ip_address": host, "gateway": None}],
         "log_counts": {},
+        "warnings": ["configured_runtime_fallback"],
     }
     
     # Probe TequilAPI
@@ -453,7 +355,7 @@ async def _probe_api(
 
     container_info["running"] = api_up
     container_info["status"] = "running" if api_up else "unreachable"
-    container_info["api"] = {
+    api = {
         "up": api_up,
         "metrics": {},
         "endpoints": {
@@ -464,6 +366,9 @@ async def _probe_api(
         },
         "status_code": 200 if api_up else None,
     }
+    if container_info.get("portal_identity"):
+        api["identity"] = container_info["portal_identity"]
+    container_info["api"] = api
     
     readings.append(Reading(
         source_type="myst",
@@ -481,7 +386,7 @@ async def _probe_api(
     # Collect metrics from configured endpoints
     endpoints = config.api_endpoints or _create_default_endpoints()
     for endpoint_config in endpoints:
-        if endpoint_config.path in BLOCKED_ENDPOINTS:
+        if endpoint_config.path in BLOCKED_ENDPOINTS or endpoint_config.path in SKIPPED_ENDPOINTS:
             continue
             
         try:
@@ -545,7 +450,7 @@ async def _fetch_api_endpoint(
         async with httpx.AsyncClient(base_url=base_url, timeout=timeout_seconds, headers=headers) as client:
             response = await client.get(path)
             response.raise_for_status()
-            data = response.json()
+            data = _decode_api_response(response)
     except Exception as exc:
         LOGGER.warning(
             "API endpoint request failed name=%s endpoint=%s path=%s error=%s",
@@ -564,7 +469,7 @@ async def _fetch_api_endpoint(
         "ok": True,
         "status_code": response.status_code,
         "path": path,
-        "raw_data": data,  # Preserve the raw API response data
+        "data": data,
     }
     for metric_name, value in metrics.items():
         readings.append(Reading(
@@ -615,114 +520,8 @@ def _extract_metrics_from_response(data: Any, prefix: str) -> Dict[str, float]:
     return metrics
 
 
-def _matches_patterns(name: str, patterns: List[str]) -> bool:
-    """Check if a container name matches any of the patterns.
-    
-    Args:
-        name: Container name
-        patterns: List of regex patterns
-        
-    Returns:
-        True if name matches any pattern
-    """
-    return any(re.search(pattern, name) for pattern in patterns)
-
-
-def _uptime_seconds(info: Dict[str, Any]) -> float | None:
-    """Calculate container uptime in seconds.
-    
-    Args:
-        info: Container info dictionary
-        
-    Returns:
-        Uptime in seconds or None
-    """
-    started_at = info.get("State", {}).get("StartedAt")
-    if not started_at:
-        return None
+def _decode_api_response(response: httpx.Response) -> Any:
     try:
-        started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-        return (datetime.now(started.tzinfo) - started).total_seconds()
-    except Exception:
-        return None
-
-
-def _networks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Extract network information from container info.
-    
-    Args:
-        info: Container info dictionary
-        
-    Returns:
-        List of network dictionaries
-    """
-    networks = info.get("NetworkSettings", {}).get("Networks", {})
-    return [
-        {
-            "name": name,
-            "ip_address": network.get("IPAddress"),
-            "gateway": network.get("Gateway"),
-        }
-        for name, network in networks.items()
-    ]
-
-
-def _count_log_events(logs: List[str]) -> Dict[str, int]:
-    """Count log events by type.
-    
-    Args:
-        logs: List of log lines
-        
-    Returns:
-        Dictionary of event counts
-    """
-    counts: Dict[str, int] = {}
-    for line in logs:
-        line_lower = line.lower()
-        if "error" in line_lower or "exception" in line_lower:
-            counts["error_or_warning"] = counts.get("error_or_warning", 0) + 1
-        if "identity" in line_lower and ("warning" in line_lower or "error" in line_lower):
-            counts["identity_warning"] = counts.get("identity_warning", 0) + 1
-        if "promise" in line_lower:
-            counts["promise"] = counts.get("promise", 0) + 1
-        if "session" in line_lower:
-            counts["session"] = counts.get("session", 0) + 1
-    return counts
-
-
-def _container_host(info: Dict[str, Any], default_host: str) -> str:
-    """Determine container host.
-    
-    Args:
-        info: Container info dictionary
-        default_host: Default host to use
-        
-    Returns:
-        Host string
-    """
-    networks = info.get("NetworkSettings", {}).get("Networks", {})
-    for network in networks.values():
-        ip = network.get("IPAddress")
-        if ip:
-            return ip
-    return default_host
-
-
-def _container_port(info: Dict[str, Any], default_port: int) -> int:
-    """Determine container port.
-    
-    Args:
-        info: Container info dictionary
-        default_port: Default port to use
-        
-    Returns:
-        Port number
-    """
-    ports = info.get("NetworkSettings", {}).get("Ports", {})
-    for container_port, host_ports in ports.items():
-        if container_port.startswith(f"{default_port}/tcp") and host_ports:
-            try:
-                return int(host_ports[0]["HostPort"])
-            except (ValueError, KeyError):
-                continue
-    return default_port
+        return response.json()
+    except ValueError:
+        return response.text

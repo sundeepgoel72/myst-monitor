@@ -565,12 +565,13 @@ def _match_local_nodes(portal_nodes: List[Dict[str, Any]], local_nodes: List[Dic
     """
     by_ip: Dict[str, Dict[str, Any]] = {}
     for local_node in local_nodes:
+        host = str(local_node.get("host") or "").strip()
+        if host:
+            by_ip[host] = local_node
         for network in local_node.get("networks", []):
             ip_address = network.get("ip_address")
             if ip_address:
                 by_ip[str(ip_address)] = local_node
-            if network.get("name") == "host" and local_node.get("host"):
-                by_ip[str(local_node["host"])] = local_node
 
     matches: Dict[str, Dict[str, Any]] = {}
     for portal_node in portal_nodes:
@@ -602,6 +603,7 @@ def _local_node_summary(local_node: Dict[str, Any]) -> Dict[str, Any]:
         "uptime_seconds": local_node.get("uptime_seconds"),
         "networks": local_node.get("networks", []),
         "log_counts": local_node.get("log_counts", {}),
+        "api": local_node.get("api", {}),
         "warnings": local_node.get("warnings", []),
     }
 

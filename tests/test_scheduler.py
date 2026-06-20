@@ -112,3 +112,60 @@ def test_collector_scheduler_persists_mystnodes_payload_and_temp_file(tmp_path):
         row = conn.execute("select snapshot_json from collections order by id desc limit 1").fetchone()
     snapshot = json.loads(row[0])
     assert snapshot["mystnodes"]["nodes"][0]["account"] == "account-a"
+
+
+def test_scheduler_build_snapshot_dedupes_raw_runtime_nodes_and_applies_portal_match() -> None:
+    scheduler = CollectorScheduler(MystMonConfig(), ReadingStore())
+    raw_one = {
+        "name": "node-a",
+        "container_name": "node-a",
+        "host": "192.168.1.10",
+        "running": True,
+        "status": "running",
+        "api": {"up": True, "metrics": {"provider_quality": 2.5}},
+    }
+    raw_two = {
+        "name": "node-a",
+        "container_name": "node-a",
+        "host": "192.168.1.10",
+        "running": True,
+        "status": "running",
+        "api": {"up": True, "metrics": {"sessions_count_1d": 3}},
+    }
+    mystnodes_portal = {
+        "nodes": [
+            {
+                "id": "portal-1",
+                "identity": "identity-1",
+                "localIp": "192.168.1.10",
+                "name": "node-a",
+                "account": "account-a",
+            }
+        ],
+        "local_matches": {
+            "portal-1": {
+                "name": "node-a",
+                "container_name": "node-a",
+                "host": "192.168.1.10",
+                "running": True,
+                "status": "running",
+                "api": {"up": True, "metrics": {"provider_quality": 2.5, "sessions_count_1d": 3}},
+            }
+        },
+    }
+
+    readings = [
+        Mock(source_type="myst", raw_data=raw_one),
+        Mock(source_type="myst", raw_data=raw_two),
+    ]
+
+    snapshot = scheduler._build_snapshot(readings, mystnodes_portal)
+
+    assert len(snapshot["nodes"]) == 1
+    assert snapshot["generated_at"].endswith("+05:30")
+    node = snapshot["nodes"][0]
+    assert node["local_match"] is True
+    assert node["portal_account"] == "account-a"
+    assert node["portal_identity"] == "identity-1"
+    assert node["api"]["metrics"]["provider_quality"] == 2.5
+    assert node["api"]["metrics"]["sessions_count_1d"] == 3

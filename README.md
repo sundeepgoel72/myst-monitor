@@ -4,18 +4,18 @@
 [![Release](https://img.shields.io/github/v/release/sundeepgoel72/myst-monitor)](https://github.com/sundeepgoel72/myst-monitor/releases)
 [![Tests](https://img.shields.io/github/actions/workflow/status/sundeepgoel72/myst-monitor/test.yml?branch=main&label=tests)](https://github.com/sundeepgoel72/myst-monitor/actions/workflows/test.yml)
 
-Dockerized Prometheus and SNMP monitoring bridge for Mysterium nodes.
+WSL-first monitoring bridge for Mysterium nodes, with Docker reserved for final HP400 verification and live service deployment.
 
 ## Features
 
-- **Docker Integration**: Auto-discovers local and remote MYST containers
+- **Local Runtime Discovery**: Probes explicitly configured local MYST runtimes from WSL
 - **TequilAPI Monitoring**: Read-only monitoring of Mysterium node TequilAPI endpoints
 - **Prometheus Export**: Exposes container and API metrics in Prometheus format
 - **SNMP Extend**: Publishes node status via SNMP extend script
 - **Web UI**: Dashboard with fleet overview, history, and settings
 - **Telegram Reports**: Automated earnings and metric reports
 - **SQLite History**: Persistent storage of collection snapshots
-- **Multi-host Support**: SSH-based inventory of remote Docker hosts
+- **Multi-host Support**: Configured local runtimes plus remote TequilAPI hosts
 
 ## TequilAPI Integration
 
@@ -43,14 +43,45 @@ cp config.example.yaml config.yaml
 # Optional: copy the local override sample for host-specific settings
 cp config.local.example.yaml config.local.yaml
 
-# Start the service
-docker compose up -d
+# Create or activate the local virtualenv on WSL
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r requirements-dev.txt
 
-# Access the web UI
-open http://localhost:8072/ui
+# Run a focused verification check
+PYTHONPATH=/home/sundeep/projects/mystmon .venv/bin/pytest tests/test_release_validation.py -q
+
+# Verify the package imports on WSL
+.venv/bin/python -c "import mystmon.api; print('ok')"
 ```
 
-## Configuration
+## Current State
+
+- Day-to-day development and testing is now WSL-only at `/home/sundeep/projects/mystmon`.
+- Local discovery no longer uses Docker fallback. The collector probes `myst.containers[*].host` directly from WSL.
+- CSV export appends into the active `collection_*` file set instead of creating a new batch on every run.
+- Wallet state is stored through the main snapshot/history/export path and currently appears in `mystnodes_accounts.csv`.
+- `service.timezone` now controls rendered log timestamps and the persisted/exported `generated_at` / `collected_at` values used in snapshot, SQLite history, and CSV files.
+- Current known issue: `latest.json` still stores one raw node entry per reading, so `snapshot["nodes"]` is inflated and should be deduplicated in the next pass.
+
+## Environment Model
+
+- All day-to-day development, debugging, linting, and test execution should happen on the WSL checkout at `/home/sundeep/projects/mystmon`.
+- Use a local virtualenv on WSL for Python work.
+- Docker on HP400 is reserved for final verification:
+  - `mystmon-dev` only when an explicit dev-container check is needed near the end
+  - `mystmon-prod` for the live service and final deployment validation
+
+## Docker Modes
+
+- `docker-compose.yml` runs the image-based deployment container as `mystmon-prod`.
+- `docker-compose.dev.yml` pulls the published GHCR dev image as `mystmon-dev`.
+- Docker is not part of local discovery.
+- Local development runs the collector directly on WSL and writes snapshot/CSV outputs there.
+- HP400 `mystmon-prod` remains the final live-service verification target.
+- Published image source:
+  - `ghcr.io/sundeepgoel72/mystmon:dev` from pushes to `main`
+  - `ghcr.io/sundeepgoel72/mystmon:<version>` from release tags like `v0.75.0-beta.3`
 
 Canonical configuration:
 - [config.example.yaml](config.example.yaml) for the portable base config
@@ -65,7 +96,7 @@ Environment file:
 
 Key configuration areas:
 
-- **MYST Collection**: Docker socket, container patterns, TequilAPI settings
+- **MYST Collection**: configured local runtime hosts, remote TequilAPI hosts, TequilAPI settings
 - **MystNodes**: one or more portal accounts in `mystnodes_accounts`
 - **Prometheus**: Target endpoints for additional metric collection
 - **SNMP**: Target hosts and OIDs for SNMP polling
@@ -116,23 +147,43 @@ Key endpoints:
 Run the test suite:
 
 ```bash
-# Run all tests
-pytest
+# Run all tests on WSL
+PYTHONPATH=/home/sundeep/projects/mystmon .venv/bin/pytest
 
-# Run only backend tests
-pytest tests/test_*.py
+# Run focused backend tests on WSL
+PYTHONPATH=/home/sundeep/projects/mystmon .venv/bin/pytest tests/test_*.py
 
-# Run only frontend/UI tests with Playwright
-pytest -m ui
+# Run only frontend/UI tests with Playwright when needed
+PYTHONPATH=/home/sundeep/projects/mystmon .venv/bin/pytest -m ui
 
 # Run with coverage
-pytest --cov=mystmon --cov-report=html
+PYTHONPATH=/home/sundeep/projects/mystmon .venv/bin/pytest --cov=mystmon --cov-report=html
 ```
 
 Operational note:
-- Run code and validation locally on the host by default.
-- Do not use Docker containers for testing or debugging unless explicitly requested.
-- Prefer a local virtualenv for test execution when possible.
+- Run code and validation on WSL by default.
+- Do not use Docker containers for development testing or debugging unless explicitly requested.
+- Prefer a local virtualenv for test execution.
+- Use HP400 Docker only for final verification passes against `mystmon-dev` or `mystmon-prod`.
+
+Recent verified commands:
+
+```bash
+.venv/bin/python -c "import mystmon.api; print('ok')"
+PYTHONPATH=/home/sundeep/projects/mystmon .venv/bin/pytest tests/test_release_validation.py -q
+PYTHONPATH=/home/sundeep/projects/mystmon .venv/bin/pytest tests/test_myst_local_discovery.py tests/test_export_csv.py tests/test_scheduler.py tests/test_mystnodes_collector.py tests/test_config.py -q
+```
+
+Latest result:
+- focused backend set: `24 passed`
+- release validation: `1 passed, 1 skipped`
+- live local collection/export on WSL created:
+  - `data/collection_10_summary.csv`
+  - `data/collection_10_mystnodes_accounts.csv`
+  - `data/collection_10_mystnodes_portal_nodes.csv`
+  - `data/collection_10_mystnodes_local_runtime_nodes.csv`
+  - `data/collection_10_mystnodes_local_hosts.csv`
+  - `data/latest.json`
 
 ## Documentation
 

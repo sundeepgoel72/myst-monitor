@@ -1,7 +1,7 @@
 services:
-  mystmon:
-    build: .
-    image: ${MYSTMON_IMAGE:-mystmon:0.75.0-beta.3}
+  mystmon-dev:
+    image: ${MYSTMON_IMAGE:-ghcr.io/sundeepgoel72/mystmon:dev}
+    container_name: mystmon-dev
     healthcheck:
       test:
         - CMD-SHELL

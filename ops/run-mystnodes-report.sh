@@ -13,6 +13,7 @@ PYTHONPATH=. MYSTMON_DATA_DIR="$DATA_DIR" MYSTMON_LOG_LEVEL="$LOG_LEVEL" "$PYTHO
 import asyncio
 import logging
 import os
+
 from mystmon.collectors.myst import _probe_api_async
 from mystmon.collectors.mystnodes import collect_mystnodes_portal_accounts
 from mystmon.config import load_config

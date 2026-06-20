@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["collect_myst_nodes_async", "collect_mystnodes_portal", "collect_prometheus", "collect_snmp"]
+__all__ = [
+    "collect_myst_nodes_async",
+    "collect_mystnodes_portal",
+    "collect_mystnodes_portal_accounts",
+    "collect_prometheus",
+    "collect_snmp",
+]
 
 
 def __getattr__(name: str) -> Any:
@@ -14,6 +20,10 @@ def __getattr__(name: str) -> Any:
         from mystmon.collectors.mystnodes import collect_mystnodes_portal
 
         return collect_mystnodes_portal
+    if name == "collect_mystnodes_portal_accounts":
+        from mystmon.collectors.mystnodes import collect_mystnodes_portal_accounts
+
+        return collect_mystnodes_portal_accounts
     if name == "collect_prometheus":
         from mystmon.collectors.prometheus import collect_prometheus
 

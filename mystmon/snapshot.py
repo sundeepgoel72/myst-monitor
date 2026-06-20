@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from mystmon.timeutils import now_local
 
 
 def build_snapshot(
     nodes: list[dict[str, Any]],
     collection_counts: dict[str, int],
     mystnodes_portal: dict[str, Any] | None = None,
+    timezone_name: str | None = None,
 ) -> dict[str, Any]:
     snapshot = {
-        "generated_at": datetime.now(UTC).isoformat(),
+        "generated_at": now_local(timezone_name).isoformat(),
         "collection_counts": collection_counts,
         "nodes": nodes,
     }

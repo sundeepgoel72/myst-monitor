@@ -8,7 +8,7 @@ from mystmon.history import HistoryStore
 
 def test_history_appends_snapshots_and_calculates_delta(tmp_path) -> None:
     bootstrap_storage(str(tmp_path / "mystmon.db"), str(tmp_path / "latest.json"), str(tmp_path / "snmp_extend.txt"))
-    store = HistoryStore(str(tmp_path / "mystmon.db"))
+    store = HistoryStore(str(tmp_path / "mystmon.db"), timezone_name="Asia/Kolkata")
     first = _snapshot(datetime(2026, 5, 24, 2, 0, tzinfo=UTC), earnings=10.0, quality=2.0, warnings=1)
     second = _snapshot(datetime(2026, 5, 25, 3, 0, tzinfo=UTC), earnings=12.5, quality=2.5, warnings=4)
 
@@ -32,7 +32,7 @@ def test_history_appends_snapshots_and_calculates_delta(tmp_path) -> None:
 
 def test_history_missing_prior_values_are_unknown(tmp_path) -> None:
     bootstrap_storage(str(tmp_path / "mystmon.db"), str(tmp_path / "latest.json"), str(tmp_path / "snmp_extend.txt"))
-    store = HistoryStore(str(tmp_path / "mystmon.db"))
+    store = HistoryStore(str(tmp_path / "mystmon.db"), timezone_name="Asia/Kolkata")
     store.append_snapshot(_snapshot(datetime(2026, 5, 25, 3, 0, tzinfo=UTC), earnings=12.5, quality=2.5))
 
     delta = store.delta(hours=24)
@@ -44,7 +44,7 @@ def test_history_missing_prior_values_are_unknown(tmp_path) -> None:
 
 def test_report_records_prevent_duplicates(tmp_path) -> None:
     bootstrap_storage(str(tmp_path / "mystmon.db"), str(tmp_path / "latest.json"), str(tmp_path / "snmp_extend.txt"))
-    store = HistoryStore(str(tmp_path / "mystmon.db"))
+    store = HistoryStore(str(tmp_path / "mystmon.db"), timezone_name="Asia/Kolkata")
 
     assert store.report_sent("2026-05-25") is False
     store.record_report("2026-05-25", 24, "sent", "message")
@@ -54,7 +54,7 @@ def test_report_records_prevent_duplicates(tmp_path) -> None:
 
 def test_history_skips_unreachable_placeholders_when_portal_nodes_exist(tmp_path) -> None:
     bootstrap_storage(str(tmp_path / "mystmon.db"), str(tmp_path / "latest.json"), str(tmp_path / "snmp_extend.txt"))
-    store = HistoryStore(str(tmp_path / "mystmon.db"))
+    store = HistoryStore(str(tmp_path / "mystmon.db"), timezone_name="Asia/Kolkata")
     snapshot = _snapshot(datetime(2026, 5, 25, 3, 0, tzinfo=UTC), earnings=12.5, quality=2.5)
     snapshot["nodes"].append(
         {
@@ -76,7 +76,7 @@ def test_history_skips_unreachable_placeholders_when_portal_nodes_exist(tmp_path
 
 def test_history_counts_local_running_nodes_without_portal_online(tmp_path) -> None:
     bootstrap_storage(str(tmp_path / "mystmon.db"), str(tmp_path / "latest.json"), str(tmp_path / "snmp_extend.txt"))
-    store = HistoryStore(str(tmp_path / "mystmon.db"))
+    store = HistoryStore(str(tmp_path / "mystmon.db"), timezone_name="Asia/Kolkata")
     snapshot = {
         "generated_at": datetime(2026, 5, 25, 3, 0, tzinfo=UTC).isoformat(),
         "collection_counts": {"myst": 1, "mystnodes": 0, "prometheus": 0, "snmp": 0},
@@ -108,7 +108,7 @@ def test_history_counts_local_running_nodes_without_portal_online(tmp_path) -> N
 
 def test_history_overall_preserves_unknown_portal_metrics(tmp_path) -> None:
     bootstrap_storage(str(tmp_path / "mystmon.db"), str(tmp_path / "latest.json"), str(tmp_path / "snmp_extend.txt"))
-    store = HistoryStore(str(tmp_path / "mystmon.db"))
+    store = HistoryStore(str(tmp_path / "mystmon.db"), timezone_name="Asia/Kolkata")
     snapshot = {
         "generated_at": datetime(2026, 5, 25, 3, 0, tzinfo=UTC).isoformat(),
         "collection_counts": {"myst": 1, "mystnodes": 0, "prometheus": 0, "snmp": 0},
@@ -135,7 +135,7 @@ def test_history_overall_preserves_unknown_portal_metrics(tmp_path) -> None:
 
 def test_history_exposes_overall_and_node_sqlite_views(tmp_path) -> None:
     bootstrap_storage(str(tmp_path / "mystmon.db"), str(tmp_path / "latest.json"), str(tmp_path / "snmp_extend.txt"))
-    store = HistoryStore(str(tmp_path / "mystmon.db"))
+    store = HistoryStore(str(tmp_path / "mystmon.db"), timezone_name="Asia/Kolkata")
     store.append_snapshot(_snapshot(datetime(2026, 5, 24, 2, 0, tzinfo=UTC), earnings=10.0, quality=2.0))
     store.append_snapshot(_snapshot(datetime(2026, 5, 25, 3, 0, tzinfo=UTC), earnings=12.5, quality=2.5))
 
@@ -155,7 +155,7 @@ def test_history_exposes_overall_and_node_sqlite_views(tmp_path) -> None:
 
 def test_history_public_nodes_include_known_flags(tmp_path) -> None:
     bootstrap_storage(str(tmp_path / "mystmon.db"), str(tmp_path / "latest.json"), str(tmp_path / "snmp_extend.txt"))
-    store = HistoryStore(str(tmp_path / "mystmon.db"))
+    store = HistoryStore(str(tmp_path / "mystmon.db"), timezone_name="Asia/Kolkata")
     store.append_snapshot(_snapshot(datetime(2026, 5, 25, 3, 0, tzinfo=UTC), earnings=12.5, quality=2.5))
 
     latest_nodes = store.nodes()
@@ -168,7 +168,7 @@ def test_history_public_nodes_include_known_flags(tmp_path) -> None:
 
 def test_history_public_nodes_include_tequilapi_fields(tmp_path) -> None:
     bootstrap_storage(str(tmp_path / "mystmon.db"), str(tmp_path / "latest.json"), str(tmp_path / "snmp_extend.txt"))
-    store = HistoryStore(str(tmp_path / "mystmon.db"))
+    store = HistoryStore(str(tmp_path / "mystmon.db"), timezone_name="Asia/Kolkata")
     snapshot = _snapshot(datetime(2026, 5, 25, 3, 0, tzinfo=UTC), earnings=12.5, quality=2.5)
     snapshot["nodes"][0]["api"] = {
         "enabled": True,
@@ -204,6 +204,21 @@ def test_history_public_nodes_include_tequilapi_fields(tmp_path) -> None:
     assert node["api_services_running"] == 6
     assert node["api_sessions_1d"] == 817
     assert node["api_provider_quality"] == 1.7
+
+
+def test_history_persists_and_returns_local_timezone_timestamps(tmp_path) -> None:
+    bootstrap_storage(str(tmp_path / "mystmon.db"), str(tmp_path / "latest.json"), str(tmp_path / "snmp_extend.txt"))
+    store = HistoryStore(str(tmp_path / "mystmon.db"), timezone_name="Asia/Kolkata")
+    snapshot = _snapshot(datetime(2026, 5, 25, 3, 0, tzinfo=UTC), earnings=12.5, quality=2.5)
+
+    store.append_snapshot(snapshot)
+
+    latest = store.latest_collection()
+    node = store.nodes()["nodes"][0]
+
+    assert latest is not None
+    assert latest["collected_at"] == "2026-05-25T08:30:00+05:30"
+    assert node["collected_at"] == "2026-05-25T08:30:00+05:30"
 
 
 def _snapshot(collected_at: datetime, earnings: float, quality: float, warnings: int = 0) -> dict:

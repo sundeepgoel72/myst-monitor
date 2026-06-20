@@ -93,6 +93,31 @@ def write_collection_csv_exports(snapshot: dict[str, Any], data_dir: str, collec
             "api_sessions_1d",
             "api_sessions_7d",
             "api_nat_type",
+            "api_proposals_count",
+            "api_sessions_total_items",
+            "api_sessions_agg_count",
+            "api_sessions_agg_consumers",
+            "api_sessions_agg_bytes_received",
+            "api_sessions_agg_bytes_sent",
+            "api_sessions_agg_duration",
+            "api_sessions_agg_tokens",
+            "api_sessions_connectivity_entries",
+            "api_sessions_connectivity_failures",
+            "api_payment_hermes_percent",
+            "api_payment_registration_human",
+            "api_payment_settlement_human",
+            "api_payment_decrease_stake_human",
+            "api_provider_active_percent",
+            "api_provider_online_percent",
+            "api_provider_public_earnings_human",
+            "api_provider_data_transfer_earnings_human",
+            "api_provider_scraping_earnings_human",
+            "api_provider_dvpn_earnings_human",
+            "api_provider_monitoring_earnings_human",
+            "api_config_active_services",
+            "api_config_tequilapi_address",
+            "api_config_tequilapi_port",
+            "api_config_discovery_type",
         ],
         ((collected_at, *row) for row in _local_runtime_node_rows(snapshot)),
     )
@@ -238,6 +263,13 @@ def _local_runtime_node_rows(snapshot: dict[str, Any]) -> list[tuple[str, ...]]:
     rows: list[tuple[str, ...]] = []
     for node in _local_export_nodes(snapshot):
         api = node.get("api") or {}
+        sessions = _get_nested(api, ["endpoints", "sessions", "data"], {}) or {}
+        session_stats = _get_nested(api, ["endpoints", "session_stats_aggregated", "data", "stats"], {}) or {}
+        session_connectivity = _get_nested(api, ["endpoints", "sessions_connectivity_status", "data", "entries"], []) or []
+        payments_v2 = _get_nested(api, ["endpoints", "transactor_fees_v2", "data", "current"], {}) or {}
+        provider_activity = _get_nested(api, ["endpoints", "provider_activity_stats", "data"], {}) or {}
+        provider_earnings = _get_nested(api, ["endpoints", "provider_service_earnings", "data"], {}) or {}
+        config_data = _get_nested(api, ["endpoints", "config", "data", "data"], {}) or {}
         rows.append(
             (
                 str(node.get("host", "")),
@@ -260,6 +292,31 @@ def _local_runtime_node_rows(snapshot: dict[str, Any]) -> list[tuple[str, ...]]:
                 _csv_number(_get_nested(api, ["metrics", "provider_sessions_1d_count"], "")),
                 _csv_number(_get_nested(api, ["metrics", "provider_sessions_7d_count"], "")),
                 str(_get_nested(api, ["endpoints", "nat_type", "data", "type"], "")),
+                str(len((_get_nested(api, ["endpoints", "proposals", "data", "proposals"], []) or []))),
+                _csv_number(sessions.get("total_items")),
+                _csv_number(session_stats.get("count")),
+                _csv_number(session_stats.get("count_consumers")),
+                _csv_number(session_stats.get("sum_bytes_received")),
+                _csv_number(session_stats.get("sum_bytes_sent")),
+                _csv_number(session_stats.get("sum_duration")),
+                _csv_number(session_stats.get("sum_tokens")),
+                str(len(session_connectivity)),
+                str(sum(1 for entry in session_connectivity if _get_nested(entry, ["code"], 1000) != 1000)),
+                str(_get_nested(api, ["endpoints", "transactor_fees_v2", "data", "hermes_percent"], "")),
+                str(_get_nested(payments_v2, ["registration", "human"], "")),
+                str(_get_nested(payments_v2, ["settlement", "human"], "")),
+                str(_get_nested(payments_v2, ["decrease_stake", "human"], "")),
+                _csv_number(provider_activity.get("active_percent")),
+                _csv_number(provider_activity.get("online_percent")),
+                str(_get_nested(provider_earnings, ["public_tokens", "human"], "")),
+                str(_get_nested(provider_earnings, ["data_transfer_tokens", "human"], "")),
+                str(_get_nested(provider_earnings, ["scraping_tokens", "human"], "")),
+                str(_get_nested(provider_earnings, ["dvpn_tokens", "human"], "")),
+                str(_get_nested(provider_earnings, ["monitoring_tokens", "human"], "")),
+                str(config_data.get("active-services", "")),
+                str(_get_nested(config_data, ["tequilapi", "address"], "")),
+                _csv_number(_get_nested(config_data, ["tequilapi", "port"], "")),
+                _csv_json(_get_nested(config_data, ["discovery", "type"], "")),
             )
         )
     return rows
@@ -531,4 +588,12 @@ def _csv_bool(value: Any) -> str:
 def _csv_number(value: Any) -> str:
     if value is None or value == "":
         return ""
+    return str(value)
+
+
+def _csv_json(value: Any) -> str:
+    if value is None or value == "":
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, sort_keys=True)
     return str(value)

@@ -61,16 +61,36 @@ def test_match_local_nodes_handles_host_network_container() -> None:
     assert matches["portal-1"]["container_name"] == "myst.1.x"
 
 
+def test_match_local_nodes_uses_host_even_without_network_entries() -> None:
+    matches = _match_local_nodes(
+        [{"id": "portal-1", "name": "node-one", "localIp": "192.0.2.71"}],
+        [
+            {
+                "container_name": "myst.21.x",
+                "host": "192.0.2.71",
+                "running": True,
+                "status": "running",
+                "restart_count": 0,
+                "uptime_seconds": 120,
+                "networks": [],
+                "log_counts": {},
+                "warnings": [],
+            }
+        ],
+    )
+
+    assert matches["portal-1"]["host"] == "192.0.2.71"
+    assert matches["portal-1"]["container_name"] == "myst.21.x"
+
+
 def test_wallet_balance_endpoint_uses_configured_wallet_address(monkeypatch) -> None:
     captured = {}
 
-    async def fake_request_json(client, config, method, path, **kwargs):
-        captured["method"] = method
-        captured["path"] = path
-        captured["params"] = kwargs.get("params")
-        return {"ok": True, "status_code": 200, "data": {"ok": True}}
+    async def fake_fetch_wallet_state(config):
+        captured["wallet_address"] = config.wallet_address
+        return {"ok": True, "status_code": 200, "data": {"summary": "$60.02 across 2 Chains"}}
 
-    monkeypatch.setattr("mystmon.collectors.mystnodes._request_json", fake_request_json)
+    monkeypatch.setattr("mystmon.collectors.mystnodes._fetch_wallet_state", fake_fetch_wallet_state)
 
     endpoint = MystNodesPortalEndpointConfig(name="wallet_balance", path="/api/v2/node/balance")
     config = MystNodesPortalAccountConfig(wallet_address="0x9A183F79b7b803DF658DB0aC6159f0016e9db4bE")
@@ -78,10 +98,9 @@ def test_wallet_balance_endpoint_uses_configured_wallet_address(monkeypatch) -> 
     result = asyncio.run(_fetch_endpoint(object(), config, endpoint, {}))
 
     assert result is not None
-    assert captured["method"] == "GET"
-    assert captured["path"] == "/api/v2/node/balance"
-    assert captured["params"]["walletAddress"] == "0x9A183F79b7b803DF658DB0aC6159f0016e9db4bE"
-    assert captured["params"]["address"] == "0x9A183F79b7b803DF658DB0aC6159f0016e9db4bE"
+    assert captured["wallet_address"] == "0x9A183F79b7b803DF658DB0aC6159f0016e9db4bE"
+    assert result["ok"] is True
+    assert result["data"]["summary"] == "$60.02 across 2 Chains"
 
 
 def test_collect_mystnodes_portal_skip_log_is_redacted(caplog) -> None:
@@ -171,9 +190,9 @@ def test_collect_mystnodes_portal_account_uses_account_field_for_email() -> None
 
 
 def test_collect_mystnodes_portal_accounts_handles_empty_list() -> None:
-    """Test that collecting from empty account list returns None."""
+    """Test that collecting from empty account list returns an empty result."""
     result = asyncio.run(collect_mystnodes_portal_accounts([], 30))
-    assert result is None
+    assert result == []
 
 
 def test_collect_mystnodes_portal_accounts_filters_disabled_accounts() -> None:

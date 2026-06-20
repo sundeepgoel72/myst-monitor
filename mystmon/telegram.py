@@ -40,21 +40,33 @@ class TelegramNotifier:
         self.chat_id = os.getenv(config.telegram.chat_id_env) if config.telegram.chat_id_env else None
         self.enabled = config.telegram.enabled and self.bot_token and self.chat_id
     
-    async def send_report(self) -> None:
+    async def send_report(self, hours: int | None = None, force: bool = False) -> dict[str, Any]:
         """Send a daily report via Telegram.
         
         Generates and sends a daily status report containing node summaries
         and key metrics to the configured Telegram chat.
         """
         if not self.enabled:
-            return
+            return {"ok": False, "reason": "disabled", "hours": hours, "force": force}
             
         try:
             message = self._generate_report_message()
             await self._send_message(message)
             logger.info("Telegram report sent successfully")
+            return {"ok": True, "hours": hours, "force": force}
         except Exception as e:
             logger.error("Failed to send Telegram report: %s", e)
+            return {"ok": False, "reason": str(e), "hours": hours, "force": force}
+
+    async def send_test(self) -> dict[str, Any]:
+        if not self.enabled:
+            return {"ok": False, "reason": "disabled"}
+        try:
+            await self._send_message("MystMon Telegram test message")
+            return {"ok": True}
+        except Exception as e:
+            logger.error("Failed to send Telegram test message: %s", e)
+            return {"ok": False, "reason": str(e)}
     
     def _generate_report_message(self) -> str:
         """Generate the report message content.

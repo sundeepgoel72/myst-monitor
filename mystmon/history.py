@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from mystmon.timeutils import DEFAULT_TIMEZONE, now_local, parse_time
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -40,7 +42,7 @@ class HistoryStore:
     querying capabilities for historical analysis and reporting.
     """
     
-    def __init__(self, db_path: str) -> None:
+    def __init__(self, db_path: str, timezone_name: str = DEFAULT_TIMEZONE) -> None:
         """Initialize the history store.
         
         Creates the database file and initializes the schema if needed.
@@ -49,6 +51,7 @@ class HistoryStore:
             db_path: Path to the SQLite database file
         """
         self.db_path = db_path
+        self.timezone_name = timezone_name
         LOGGER.info("History database path: %s", self.db_path)
 
     def _connect(self) -> sqlite3.Connection:
@@ -82,7 +85,7 @@ class HistoryStore:
             ID of the inserted record
         """
         LOGGER.debug("Appending snapshot to history")
-        collected_at = _parse_time(snapshot.get("generated_at")) or datetime.now(UTC)
+        collected_at = parse_time(snapshot.get("generated_at"), self.timezone_name) or now_local(self.timezone_name)
         counts = snapshot.get("collection_counts") or {}
         with self._connect() as db:
             cursor = db.execute(
@@ -283,7 +286,7 @@ class HistoryStore:
                 INSERT OR REPLACE INTO telegram_reports (report_date, sent_at, hours, status, message)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (report_date, datetime.now(UTC).isoformat(), hours, status, message),
+                (report_date, now_local(self.timezone_name).isoformat(), hours, status, message),
             )
 
     def _record_query(self, query: str, params: tuple[Any, ...] = ()) -> CollectionRecord | None:
@@ -304,7 +307,7 @@ class HistoryStore:
             return None
         return CollectionRecord(
             id=int(row["id"]),
-            collected_at=_parse_time(row["collected_at"]) or datetime.now(UTC),
+            collected_at=parse_time(row["collected_at"], self.timezone_name) or now_local(self.timezone_name),
             counts=json.loads(row["counts_json"]),
             snapshot=json.loads(row["snapshot_json"]),
         )
@@ -342,7 +345,7 @@ class HistoryStore:
         return [
             CollectionRecord(
                 id=int(row["id"]),
-                collected_at=_parse_time(row["collected_at"]) or datetime.now(UTC),
+                collected_at=parse_time(row["collected_at"], self.timezone_name) or now_local(self.timezone_name),
                 counts=json.loads(row["counts_json"]),
                 snapshot=json.loads(row["snapshot_json"]),
             )
@@ -1073,23 +1076,3 @@ def _float_or_none(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
-def _parse_time(value: Any) -> datetime | None:
-    """Parse a time string.
-    
-    Args:
-        value: Time string to parse
-        
-    Returns:
-        Parsed datetime or None
-    """
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)

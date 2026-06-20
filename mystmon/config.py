@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import yaml
 from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
@@ -14,6 +15,13 @@ class ServiceConfig(BaseModel):
     request_timeout_seconds: int = Field(default=10, ge=1)
     data_dir: str = "/data/mystmon"
     log_window_seconds: int = Field(default=21600, ge=60)
+    timezone: str = "Asia/Kolkata"
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        ZoneInfo(value)
+        return value
 
 
 class PrometheusTarget(BaseModel):
@@ -162,6 +170,7 @@ class MystCollectorConfig(BaseModel):
             TequilApiEndpointConfig(name="healthcheck", path="/healthcheck", metric_prefix="health", category="health"),
             TequilApiEndpointConfig(name="identities", path="/identities", metric_prefix="identities", category="identities"),
             TequilApiEndpointConfig(name="services", path="/services", metric_prefix="services", category="services"),
+            TequilApiEndpointConfig(name="proposals", path="/proposals", metric_prefix="proposals", category="proposals"),
             TequilApiEndpointConfig(name="sessions", path="/sessions", metric_prefix="sessions", category="sessions"),
             TequilApiEndpointConfig(name="sessions_connectivity_status", path="/sessions-connectivity-status", metric_prefix="sessions", category="sessions"),
             TequilApiEndpointConfig(name="session_stats_dailies", path="/sessions/stats-daily", metric_prefix="sessions", category="sessions"),
@@ -229,6 +238,10 @@ class MystNodesPortalAccountConfig(BaseModel):
                 name="total_transferred",
                 path="/api/v2/node/total-transferred",
                 params={"days": 30},
+            ),
+            MystNodesPortalEndpointConfig(
+                name="wallet_balance",
+                path="/api/v2/node/balance",
             ),
             MystNodesPortalEndpointConfig(
                 name="earnings_30d",

@@ -5,6 +5,7 @@ def test_default_poll_interval_is_six_hours() -> None:
     config = MystMonConfig()
 
     assert config.service.poll_interval_seconds == 21600
+    assert config.service.timezone == "Asia/Kolkata"
 
 
 def test_snmp_target_requires_oids() -> None:
@@ -104,3 +105,12 @@ def test_mystnodes_accounts_require_env_refs() -> None:
 
     assert len(config.mystnodes_accounts) == 1
     assert config.mystnodes_accounts[0].account == "account1"
+
+
+def test_service_timezone_must_be_valid() -> None:
+    try:
+        MystMonConfig.model_validate({"service": {"timezone": "Asia/NotAZone"}})
+    except Exception as exc:
+        assert "NotAZone" in str(exc)
+    else:
+        raise AssertionError("Expected invalid timezone to fail validation")

@@ -28,7 +28,7 @@ LOGGER = logging.getLogger(__name__)
 def create_app(config: MystMonConfig | None = None) -> FastAPI:
     app_config = config or load_config()
     store = ReadingStore()
-    history = HistoryStore(app_config.history.db_path) if app_config.history.enabled else None
+    history = HistoryStore(app_config.history.db_path, timezone_name=app_config.service.timezone) if app_config.history.enabled else None
     telegram = TelegramNotifier(app_config)
     alert_manager = create_default_alert_manager(app_config) if app_config.alerting.enabled else None
     scheduler = CollectorScheduler(app_config, store, history, telegram, alert_manager)

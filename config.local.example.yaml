@@ -2,6 +2,9 @@
 # Copy to config.local.yaml and edit the MystNodes credentials.
 # Secrets that belong in the environment stay in `.env`, not here.
 
+service:
+  timezone: "Asia/Kolkata"
+
 mystnodes:
   base_url: "https://my.mystnodes.com"
 

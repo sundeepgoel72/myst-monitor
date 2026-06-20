@@ -1,8 +1,8 @@
 services:
-  mystmon:
+  mystmon-prod:
     build: .
     image: mystmon:local
-    container_name: mystmon
+    container_name: mystmon-prod
     ports:
       - "${MYSTMON_PORT:-8072}:8072"
     extra_hosts:
