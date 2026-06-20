@@ -130,38 +130,91 @@ def _summary_rows(snapshot: dict[str, Any]) -> list[tuple[str, str]]:
 def _account_rows(snapshot: dict[str, Any]) -> list[tuple[str, ...]]:
     rows: list[tuple[str, ...]] = []
     mystnodes = snapshot.get("mystnodes") or {}
-    for account in mystnodes.get("accounts", []) or []:
-        endpoints = account.get("endpoints") or {}
-        me = _endpoint_data(endpoints, "me")
-        nodes = _endpoint_data(endpoints, "nodes")
-        rows.append(
-            (
-                str(account.get("name", "")),
-                _csv_bool(account.get("enabled")),
-                _csv_bool(account.get("authenticated")),
-                str(account.get("base_url", "")),
-                str(account.get("wallet_address_hint", "")),
-                _csv_bool(_get_nested(account, ["endpoints", "wallet_balance", "ok"], None)),
-                _compact_wallet_state((account.get("endpoints") or {}).get("wallet_balance")),
-                str(_count_nodes(nodes)),
-                str(_online_count(me)),
-                str(_get_nested(me, ["data", "nodesInfo", "topOS"], "")),
-                str(_get_nested(account, ["endpoints", "total_earnings", "data", "earningsTotal"], "")),
-                str(_get_nested(account, ["endpoints", "total_transferred", "data", "transferredTotal"], "")),
+    
+    # Handle multi-account structure
+    accounts = mystnodes.get("accounts", [])
+    if accounts:
+        for account in accounts:
+            endpoints = account.get("endpoints") or {}
+            me = _endpoint_data(endpoints, "me")
+            nodes = _endpoint_data(endpoints, "nodes")
+            rows.append(
+                (
+                    str(account.get("name", "")),
+                    _csv_bool(account.get("enabled")),
+                    _csv_bool(account.get("authenticated")),
+                    str(account.get("base_url", "")),
+                    str(account.get("wallet_address_hint", "")),
+                    _csv_bool(_get_nested(account, ["endpoints", "wallet_balance", "ok"], None)),
+                    _compact_wallet_state((account.get("endpoints") or {}).get("wallet_balance")),
+                    str(_count_nodes(nodes)),
+                    str(_online_count(me)),
+                    str(_get_nested(me, ["data", "nodesInfo", "topOS"], "")),
+                    str(_get_nested(account, ["endpoints", "total_earnings", "data", "earningsTotal"], "")),
+                    str(_get_nested(account, ["endpoints", "total_transferred", "data", "transferredTotal"], "")),
+                )
             )
-        )
+    else:
+        # Handle single account structure for backward compatibility
+        for account in [mystnodes]:
+            endpoints = account.get("endpoints") or {}
+            me = _endpoint_data(endpoints, "me")
+            nodes = _endpoint_data(endpoints, "nodes")
+            rows.append(
+                (
+                    str(account.get("name", "")),
+                    _csv_bool(account.get("enabled")),
+                    _csv_bool(account.get("authenticated")),
+                    str(account.get("base_url", "")),
+                    str(account.get("wallet_address_hint", "")),
+                    _csv_bool(_get_nested(account, ["endpoints", "wallet_balance", "ok"], None)),
+                    _compact_wallet_state((account.get("endpoints") or {}).get("wallet_balance")),
+                    str(_count_nodes(nodes)),
+                    str(_online_count(me)),
+                    str(_get_nested(me, ["data", "nodesInfo", "topOS"], "")),
+                    str(_get_nested(account, ["endpoints", "total_earnings", "data", "earningsTotal"], "")),
+                    str(_get_nested(account, ["endpoints", "total_transferred", "data", "transferredTotal"], "")),
+                )
+            )
     return rows
 
 
 def _portal_node_rows(snapshot: dict[str, Any]) -> list[tuple[str, ...]]:
     rows: list[tuple[str, ...]] = []
     mystnodes = snapshot.get("mystnodes") or {}
-    for account in mystnodes.get("accounts", []) or []:
-        nodes = _endpoint_data(account.get("endpoints") or {}, "nodes")
+    
+    # Handle multi-account structure
+    accounts = mystnodes.get("accounts", [])
+    if accounts:
+        for account in accounts:
+            nodes = _endpoint_data(account.get("endpoints") or {}, "nodes")
+            for node in _nodes_list(nodes):
+                rows.append(
+                    (
+                        str(account.get("name", "")),
+                        str(node.get("id", "")),
+                        str(node.get("identity", "")),
+                        str(node.get("name", "")),
+                        str(node.get("localIp", "")),
+                        str(node.get("externalIp", "")),
+                        _csv_bool(_get_nested(node, ["nodeStatus", "online"], False)),
+                        str(_get_nested(node, ["nodeStatus", "quality"], "")),
+                        str(node.get("version", "")),
+                        str(node.get("os", "")),
+                        str(node.get("monitoringStatus", "")),
+                        str(node.get("createdAt", "")),
+                        str(node.get("updatedAt", "")),
+                        json.dumps(node.get("nodeStatus", {}).get("serviceTypes", []), sort_keys=True),
+                        _csv_number(_earnings_total(node)),
+                    )
+                )
+    else:
+        # Handle single account structure for backward compatibility
+        nodes = _endpoint_data(mystnodes.get("endpoints") or {}, "nodes")
         for node in _nodes_list(nodes):
             rows.append(
                 (
-                    str(account.get("name", "")),
+                    str(mystnodes.get("name", "")),
                     str(node.get("id", "")),
                     str(node.get("identity", "")),
                     str(node.get("name", "")),
@@ -226,12 +279,18 @@ def _local_host_rows(snapshot: dict[str, Any]) -> list[tuple[str, ...]]:
         identities = sorted({str(node.get("portal_identity", "")) for node in nodes if node.get("portal_identity")})
         portal_node_names = sorted({str(node.get("portal_node_name", "")) for node in nodes if node.get("portal_node_name")})
         container_names = sorted({str(node.get("container_name", node.get("name", ""))) for node in nodes if node.get("container_name") or node.get("name")})
+        
+        # Fix the host count calculation
+        matched_runtime_count = len(nodes)
+        matched_portal_node_count = len([node for node in nodes if node.get("portal_identity")])
+        running_count = sum(1 for node in nodes if node.get("running"))
+        
         rows.append(
             (
                 host,
-                str(len(nodes)),
-                str(len(identities)),
-                str(sum(1 for node in nodes if node.get("running"))),
+                str(matched_runtime_count),
+                str(matched_portal_node_count),
+                str(running_count),
                 json.dumps(accounts, sort_keys=True),
                 json.dumps(identities, sort_keys=True),
                 json.dumps(portal_node_names, sort_keys=True),
