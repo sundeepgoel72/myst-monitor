@@ -367,6 +367,7 @@ async def _fetch_api_endpoint(
         "ok": True,
         "status_code": response.status_code,
         "path": path,
+        "raw_data": data,  # Preserve the raw API response data
     }
     for metric_name, value in metrics.items():
         readings.append(Reading(
