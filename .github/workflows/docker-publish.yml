@@ -33,7 +33,7 @@ jobs:
 
       - name: Validate release and deploy scripts
         run: |
-          pytest tests/test_release_validation.py
+          PYTHONPATH=. pytest tests/test_release_validation.py
           bash -n ops/build-on-linux.sh ops/install-remote.sh ops/validate-mystmon.sh
           ruff check tests/test_release_validation.py
 
