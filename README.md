@@ -8,23 +8,30 @@ MystMon is a read-only monitoring service for MYST nodes. It collects runtime an
 
 ## Core Capabilities
 
-- Read-only TequilAPI monitoring for local and remote MYST runtimes
-- MystNodes portal collection for account, node, wallet, and runtime matching data
-- Snapshot and SQLite history storage with local-time timestamps driven by `service.timezone`
-- CSV exports for accounts, portal nodes, local runtimes, and local hosts
-- HTTP API, Prometheus metrics, and optional UI for operational inspection
+- Monitors local and remote MYST runtimes through read-only TequilAPI calls
+- Supports multiple MystNodes portal accounts in one deployment
+- Derives local runtime coverage from live portal node `localIp` data instead of relying only on static host lists
+- Stores snapshots and SQLite history with local-time timestamps driven by `service.timezone`
+- Exports separate CSV views for accounts, portal nodes, local runtimes, and local hosts
+- Exposes HTTP API, Prometheus metrics, and an optional inspection UI
 
-## Run From Published Docker Image
+## How To Deploy And Run
 
-Docker is for packaging and deployment only. It is not the day-to-day development or debugging path.
+Use Docker for normal operation.
 
-Pull the published dev image:
+For a normal install, pull a specific released version. The current example version is `0.1`:
+
+```bash
+docker pull ghcr.io/sundeepgoel72/mystmon:0.1
+```
+
+If you explicitly want the latest build from `main`, use:
 
 ```bash
 docker pull ghcr.io/sundeepgoel72/mystmon:dev
 ```
 
-Prepare config and data locally:
+After pulling the image, create these local files:
 
 ```bash
 cp config.example.yaml config.yaml
@@ -32,118 +39,98 @@ cp config.local.example.yaml config.local.yaml
 mkdir -p data
 ```
 
-Run the container:
+Configuration files:
+- `config.yaml`
+  - your active base runtime config
+  - copied from `config.example.yaml`
+  - use this for shared settings such as polling interval, output paths, timezone, and feature enablement
+- `config.local.yaml`
+  - optional local override file
+  - copied from `config.local.example.yaml`
+  - use this for host-specific values, local credentials, or environment-specific overrides
+
+Key configuration areas to review before first run:
+- `service`
+  - polling interval, data paths, timezone
+- `mystnodes_accounts`
+  - one or more MystNodes portal accounts
+- `outputs`
+  - latest snapshot, SNMP text, and CSV export paths
+- `history`
+  - SQLite history database path
+
+Typical config flow:
+- set `service.timezone` to your operational timezone
+- add your MystNodes portal accounts under `mystnodes_accounts`
+- keep secrets in environment variables or untracked local files
+
+Example snippet:
+
+```yaml
+service:
+  timezone: Asia/Kolkata
+
+mystnodes_accounts:
+  - account: your-myst-email@example.com
+    enabled: true
+    password: change-me
+    wallet_address: 0x1234567890abcdef1234567890abcdef12345678
+```
+
+Create a lightweight `docker-compose.yml` in the same directory:
+
+```yaml
+services:
+  mystmon:
+    image: ghcr.io/sundeepgoel72/mystmon:0.1
+    container_name: mystmon
+    restart: unless-stopped
+    ports:
+      - "8072:8072"
+    environment:
+      MYSTMON_DATA_DIR: /data/mystmon
+      MYSTMON_CONFIG: /app/config.yaml
+      MYSTMON_HOST: 0.0.0.0
+      MYSTMON_PORT: 8072
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./config.local.yaml:/app/config.local.yaml:ro
+      - ./data:/data/mystmon
+```
+
+Start the service:
 
 ```bash
-docker run -d \
-  --name mystmon-dev \
-  --restart unless-stopped \
-  -p 8072:8072 \
-  -e MYSTMON_DATA_DIR=/data/mystmon \
-  -e MYSTMON_CONFIG=/app/config.yaml \
-  -e MYSTMON_HOST=0.0.0.0 \
-  -e MYSTMON_PORT=8072 \
-  -e MYSTMON_TEQUILAPI_PASSWORD=your_tequilapi_password \
-  -e MYSTMON_SSH_PASSWORD=your_ssh_password \
-  -v "$PWD/config.yaml:/app/config.yaml:ro" \
-  -v "$PWD/config.local.yaml:/app/config.local.yaml:ro" \
-  -v "$PWD/data:/data/mystmon" \
-  ghcr.io/sundeepgoel72/mystmon:dev
+docker compose up -d
 ```
+
+The password environment variables are not part of the simple `0.1` example because they are only needed when your specific configuration actually uses them.
 
 Health check:
 
 ```bash
-curl http://127.0.0.1:8072/health
+curl http://YOUR_HOST_OR_IP:8072/health
 ```
 
 Container outputs are written under `/data/mystmon` inside the container, backed by your mounted `data/` directory.
 
-## Configuration Model
+## Development And Validation
 
-Tracked base config:
-- [config.example.yaml](config.example.yaml)
-
-Local override template:
-- [config.local.example.yaml](config.local.example.yaml)
-
-Runtime behavior:
-- copy `config.example.yaml` to `config.yaml` for your working config
-- copy `config.local.example.yaml` to `config.local.yaml` for host- or credential-specific overrides
-- keep secrets in environment variables or untracked local files
-
-Important configuration areas:
-- `service`: polling, paths, timezone
-- `myst`: local runtime and remote TequilAPI probe settings
-- `mystnodes_accounts`: MystNodes portal account configuration
-- `outputs`: latest snapshot, SNMP text, and CSV export paths
-- `history`: SQLite history storage
-- `telegram`, `ui`, `alerting`: optional service features
-
-## WSL Development Setup From Source
-
-WSL is the default environment for coding, testing, and debugging.
-
-```bash
-git clone https://github.com/sundeepgoel72/myst-monitor.git
-cd myst-monitor
-cp config.example.yaml config.yaml
-cp config.local.example.yaml config.local.yaml
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-```
-
-Verify imports:
-
-```bash
-.venv/bin/python -c "import mystmon.api; print('ok')"
-```
-
-## Testing And Validation
-
-Focused validation used in this repo:
-
-```bash
-PYTHONPATH=. .venv/bin/pytest tests/test_release_validation.py -q
-PYTHONPATH=. .venv/bin/pytest \
-  tests/test_release_validation.py \
-  tests/test_config.py \
-  tests/test_main.py \
-  tests/test_history.py \
-  tests/test_scheduler.py \
-  tests/test_export_csv.py \
-  tests/test_mystnodes_collector.py \
-  tests/test_myst_local_discovery.py -q
-```
-
-Run the full suite:
-
-```bash
-PYTHONPATH=. .venv/bin/pytest
-```
-
-Shell syntax validation for deployment helpers:
-
-```bash
-bash -n ops/build-on-linux.sh ops/install-remote.sh ops/validate-mystmon.sh
-```
+For source-based setup, testing, and developer workflow, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Deployment Notes
 
-- Canonical branch: `main`
-- Current app version: `0.1`
-- Versioning rule: increment by `0.01` for each minor release
-- GHCR publish target:
-  - `ghcr.io/sundeepgoel72/mystmon:dev` from pushes to `main`
-  - `ghcr.io/sundeepgoel72/mystmon:<version>` from tags such as `v0.1`
+- Normal and production-style deployments should use a specific version tag such as `ghcr.io/sundeepgoel72/mystmon:0.1`.
+- `ghcr.io/sundeepgoel72/mystmon:dev` tracks the latest `main` build and is better suited for preview or validation environments.
+- Versioning starts at `0.1` and increments by `0.01` for each minor release.
 - If the package page shows stale metadata, check the latest `Publish Docker Image` workflow run first. GHCR metadata updates only after a successful image push.
 
 ## Documentation
 
 - [docs/API.md](docs/API.md) - API surface and history endpoints
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) - source setup and developer validation
 - [docs/TEQUILAPI.md](docs/TEQUILAPI.md) - TequilAPI collection details
 - [docs/DESIGN.md](docs/DESIGN.md) - architecture and maintainer design notes
-- [.codex/HANDOVER.md](.codex/HANDOVER.md) - current maintainer handover for follow-on agents
 
 ## License
 
