@@ -37,6 +37,7 @@ def main() -> None:
     )
     host = os.getenv("MYSTMON_HOST", "0.0.0.0")
     port = int(os.getenv("MYSTMON_PORT", "8072"))
+    print("Hey there! Starting MystMon...")
     uvicorn.run("mystmon.api:create_app", host=host, port=port, factory=True)
 
 
