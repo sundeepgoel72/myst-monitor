@@ -228,6 +228,8 @@ async def _fetch_endpoint(
     """
     method = endpoint.method.upper()
     params = dict(endpoint.params)
+    if endpoint.name == "wallet_balance":
+        return await _fetch_wallet_state(config)
     if endpoint.name == "wallet_balance" and config.wallet_address:
         params.setdefault("walletAddress", config.wallet_address)
         params.setdefault("address", config.wallet_address)
@@ -252,6 +254,42 @@ async def _fetch_endpoint(
         )
         _log_endpoint_result(endpoint.name, result)
         return result
+
+
+async def _fetch_wallet_state(config: MystNodesPortalAccountConfig) -> Dict[str, Any]:
+    if not config.wallet_address:
+        return {"ok": False, "error": "missing wallet address"}
+    wallet_address = str(config.wallet_address).strip()
+    url = f"https://polygonscan.com/address/{wallet_address}#asset-tokens"
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            summary = _extract_wallet_summary(response.text)
+            return {
+                "ok": True,
+                "status_code": response.status_code,
+                "data": {
+                    "address": wallet_address,
+                    "url": url,
+                    "summary": summary,
+                },
+            }
+    except httpx.HTTPError as exc:
+        LOGGER.error("Wallet state fetch failed wallet=%s error=%s", _wallet_address_hint(wallet_address), exc)
+        return {"ok": False, "error": str(exc)}
+
+
+def _extract_wallet_summary(html: str) -> str:
+    patterns = [
+        r'Balance:\s*([^|<]+)',
+        r'<div class="list-usd-value">([^<]+)</div>',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, html, re.IGNORECASE)
+        if match:
+            return " ".join(match.group(1).split())
+    return ""
 
 
 def _decode_response(response: httpx.Response) -> Any:
