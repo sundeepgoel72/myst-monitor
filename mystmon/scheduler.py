@@ -156,11 +156,14 @@ class CollectorScheduler:
         )
         for reading in myst_readings:
             self.store.add(reading)
-        counts["myst"] = len(myst_readings)
-        LOGGER.info("Collected myst metrics count=%d", len(myst_readings))
-
         local_runtime_nodes = self._dedupe_myst_nodes(
             [reading.raw_data for reading in myst_readings if reading.source_type == "myst" and reading.raw_data]
+        )
+        counts["myst"] = len(local_runtime_nodes)
+        LOGGER.info(
+            "Collected myst runtime nodes=%d metric_readings=%d",
+            counts["myst"],
+            len(myst_readings),
         )
         portal_snapshot["local_matches"] = _match_local_nodes(
             portal_snapshot.get("nodes") or [],
@@ -174,9 +177,8 @@ class CollectorScheduler:
         counts["system"] = len(system_readings)
         LOGGER.info("Collected system metrics count=%d", len(system_readings))
         
-        # Build snapshot
-        for key, count in counts.items():
-            self._collection_counts[key] = self._collection_counts.get(key, 0) + count
+        # Snapshot counts are per collection cycle, not cumulative totals.
+        self._collection_counts = counts.copy()
 
         snapshot = self._build_snapshot(myst_readings, portal_snapshot)
         

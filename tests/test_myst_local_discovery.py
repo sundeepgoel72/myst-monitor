@@ -31,6 +31,7 @@ def test_collect_myst_uses_configured_local_runtime_hosts(monkeypatch) -> None:
 
     config = MystCollectorConfig(
         enabled=True,
+        fallback_targets_enabled=True,
         api_probe_enabled=True,
         api_endpoints=[
             TequilApiEndpointConfig(

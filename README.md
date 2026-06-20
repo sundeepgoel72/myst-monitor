@@ -19,10 +19,10 @@ MystMon is a read-only monitoring service for MYST nodes. It collects runtime an
 
 Use Docker for normal operation.
 
-For a normal install, pull a specific released version. The current example version is `0.1`:
+For a normal install, pull a specific released version. The current example version is `0.11`:
 
 ```bash
-docker pull ghcr.io/sundeepgoel72/mystmon:0.1
+docker pull ghcr.io/sundeepgoel72/mystmon:0.11
 ```
 
 If you explicitly want the latest build from `main`, use:
@@ -80,19 +80,26 @@ Create a lightweight `docker-compose.yml` in the same directory:
 ```yaml
 services:
   mystmon:
-    image: ghcr.io/sundeepgoel72/mystmon:0.1
+    image: ghcr.io/sundeepgoel72/mystmon:0.11
     container_name: mystmon
     restart: unless-stopped
     ports:
       - "8072:8072"
     environment:
-      MYSTMON_DATA_DIR: /data/mystmon
       MYSTMON_CONFIG: /app/config.yaml
       MYSTMON_HOST: 0.0.0.0
       MYSTMON_PORT: 8072
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./data:/data/mystmon
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8072/health', timeout=3).read()"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 ```
 
 Start the service:
@@ -101,9 +108,9 @@ Start the service:
 docker compose up -d
 ```
 
-The password environment variables are not part of the simple `0.1` example because they are only needed when your specific configuration actually uses them.
+The password environment variables are not part of the simple `0.11` example because they are only needed when your specific configuration actually uses them.
 
-The root-level `.env` file from older deployment flows is obsolete and should not be used for a normal `0.1` install.
+The root-level `.env` file from older deployment flows is obsolete and should not be used for a normal `0.11` install.
 
 Health check:
 
@@ -111,7 +118,13 @@ Health check:
 curl http://YOUR_HOST_OR_IP:8072/health
 ```
 
-Container outputs are written under `/data/mystmon` inside the container, backed by your mounted `data/` directory.
+Container health state:
+
+```bash
+docker inspect -f '{{.State.Health.Status}}' mystmon
+```
+
+With the default relative-path config, outputs are written under `data/` relative to the runtime working directory. In the compose example, that is backed by your mounted `./data` directory.
 
 ## Development And Validation
 
@@ -119,8 +132,9 @@ For source-based setup, testing, and developer workflow, see [docs/DEVELOPMENT.m
 
 ## Deployment Notes
 
-- Normal and production-style deployments should use a specific version tag such as `ghcr.io/sundeepgoel72/mystmon:0.1`.
+- Normal and production-style deployments should use a specific version tag such as `ghcr.io/sundeepgoel72/mystmon:0.11`.
 - `ghcr.io/sundeepgoel72/mystmon:dev` tracks the latest `main` build and is better suited for preview or validation environments.
+- Both shipped compose samples include a container healthcheck against `/health`.
 - Versioning starts at `0.1` and increments by `0.01` for each minor release.
 - If the package page shows stale metadata, check the latest `Publish Docker Image` workflow run first. GHCR metadata updates only after a successful image push.
 

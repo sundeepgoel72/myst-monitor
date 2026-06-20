@@ -1,6 +1,6 @@
 services:
   mystmon:
-    image: ghcr.io/sundeepgoel72/mystmon:0.1
+    image: ghcr.io/sundeepgoel72/mystmon:0.11
     container_name: mystmon
     ports:
       - "8072:8072"

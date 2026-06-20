@@ -12,17 +12,15 @@ myst:
   enabled: false
   api_probe_enabled: true
   api_default_port: 4050
-  containers: []
-  remote_hosts: []
 
 outputs:
-  csv_export_path: /data/mystmon/csv
+  csv_export_path: data/csv
 
 mystnodes_accounts:
   - account: your-myst-email@example.com
     enabled: true
     password: change-me
-    wallet_address: 0x1234567890abcdef1234567890abcdef12345678
+    wallet_address: "0x1234567890abcdef1234567890abcdef12345678"
 
 # Deferred sections for later use.
 # Keep these disabled unless you are explicitly enabling those features.

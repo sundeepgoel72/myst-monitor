@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import re
@@ -105,6 +106,10 @@ DEFAULT_ENDPOINTS = [
     {"name": "location", "path": "/location", "metric_prefix": "location"},
     {"name": "nat_type", "path": "/nat/type", "metric_prefix": "nat"},
 ]
+
+
+def _is_connectivity_error(exc: BaseException) -> bool:
+    return isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError))
 
 
 def _api_auth(config: MystCollectorConfig) -> tuple[str, str] | None:
@@ -250,13 +255,13 @@ async def collect_myst(
     local_readings = await _collect_portal_runtime_nodes(config, timeout_seconds, portal_nodes or [])
     readings.extend(local_readings)
 
-    # Configured hosts are kept only as a compatibility fallback when portal
-    # inventory is unavailable.
-    if not local_readings and not portal_nodes:
+    # Static target lists are legacy fallback/debug inputs only.
+    if config.fallback_targets_enabled and not local_readings and not portal_nodes:
         readings.extend(await _collect_configured_containers(config, timeout_seconds))
 
-    remote_readings = await _collect_remote_hosts(config, timeout_seconds)
-    readings.extend(remote_readings)
+    if config.fallback_targets_enabled:
+        remote_readings = await _collect_remote_hosts(config, timeout_seconds)
+        readings.extend(remote_readings)
     return readings
 
 
@@ -311,7 +316,7 @@ async def _collect_portal_runtime_nodes(
     timeout_seconds: int,
     portal_nodes: List[Dict[str, Any]],
 ) -> List[Reading]:
-    readings: List[Reading] = []
+    host_infos: list[dict[str, Any]] = []
     seen_hosts: set[str] = set()
     for portal_node in portal_nodes:
         if not isinstance(portal_node, dict):
@@ -322,7 +327,7 @@ async def _collect_portal_runtime_nodes(
             continue
         seen_hosts.add(host)
         node_name = str(portal_node.get("name") or identity or host)
-        host_info = {
+        host_infos.append({
             "name": node_name,
             "container_name": node_name,
             "host": host,
@@ -335,10 +340,54 @@ async def _collect_portal_runtime_nodes(
             "portal_identity": identity,
             "portal_node_name": node_name,
             "warnings": [],
-        }
-        base_url = f"http://{host}:{config.api_default_port}"
-        probe_readings = await _probe_api(base_url, config, timeout_seconds, host_info)
-        readings.extend(probe_readings)
+        })
+
+    if not host_infos:
+        return []
+
+    async def _probe_host(host_info: dict[str, Any]) -> list[Reading]:
+        base_url = f"http://{host_info['host']}:{config.api_default_port}"
+        try:
+            return await asyncio.wait_for(
+                _probe_api(base_url, config, timeout_seconds, host_info),
+                timeout=max(3, timeout_seconds + 2),
+            )
+        except asyncio.TimeoutError:
+            LOGGER.warning("Portal-derived runtime probe timed out host=%s", host_info["host"])
+            host_info["running"] = False
+            host_info["status"] = "timeout"
+            return [
+                Reading(
+                    source_type="myst",
+                    source_name=host_info["name"],
+                    metric_name="api_up",
+                    value=0.0,
+                    labels={},
+                    timestamp=datetime.now(),
+                    raw_data=host_info,
+                )
+            ]
+
+    results = await asyncio.gather(*[_probe_host(host_info) for host_info in host_infos], return_exceptions=True)
+    readings: list[Reading] = []
+    for host_info, result in zip(host_infos, results):
+        if isinstance(result, Exception):
+            LOGGER.warning("Portal-derived runtime probe failed host=%s error=%s", host_info["host"], result)
+            host_info["running"] = False
+            host_info["status"] = "error"
+            readings.append(
+                Reading(
+                    source_type="myst",
+                    source_name=host_info["name"],
+                    metric_name="api_up",
+                    value=0.0,
+                    labels={},
+                    timestamp=datetime.now(),
+                    raw_data=host_info,
+                )
+            )
+            continue
+        readings.extend(result)
     return readings
 
 
@@ -483,14 +532,19 @@ async def _probe_api(
     name = container_info["name"]
     timestamp = datetime.now()
     readings: List[Reading] = []
-    
+
     # Check if API is accessible
+    request_timeout = httpx.Timeout(timeout_seconds, connect=min(3.0, float(timeout_seconds)))
+    health_error: Exception | None = None
     try:
-        async with httpx.AsyncClient(base_url=base_url, timeout=timeout_seconds) as client:
+        async with httpx.AsyncClient(base_url=base_url, timeout=request_timeout) as client:
             response = await client.get("/healthcheck")
             api_up = response.status_code == 200
-    except Exception:
+            health_data = _decode_api_response(response) if api_up else None
+    except Exception as exc:
         api_up = False
+        health_data = None
+        health_error = exc
 
     container_info["running"] = api_up
     container_info["status"] = "running" if api_up else "unreachable"
@@ -501,6 +555,9 @@ async def _probe_api(
             "healthcheck": {
                 "ok": api_up,
                 "status_code": 200 if api_up else None,
+                "path": "/healthcheck",
+                "data": health_data,
+                "error": str(health_error) if health_error else None,
             }
         },
         "status_code": 200 if api_up else None,
@@ -522,25 +579,40 @@ async def _probe_api(
     if not api_up:
         return readings
     
-    # Collect metrics from configured endpoints
-    endpoints = config.api_endpoints or _create_default_endpoints()
-    for endpoint_config in endpoints:
-        if endpoint_config.path in BLOCKED_ENDPOINTS or endpoint_config.path in SKIPPED_ENDPOINTS:
-            continue
-            
-        try:
-            endpoint_readings = await _fetch_api_endpoint(
-                base_url, config, timeout_seconds, endpoint_config, name, timestamp, container_info
+    endpoints = [
+        endpoint_config
+        for endpoint_config in (config.api_endpoints or _create_default_endpoints())
+        if endpoint_config.path not in BLOCKED_ENDPOINTS
+        and endpoint_config.path not in SKIPPED_ENDPOINTS
+        and endpoint_config.path != "/healthcheck"
+    ]
+    results = await asyncio.gather(
+        *[
+            _fetch_api_endpoint(
+                base_url,
+                config,
+                timeout_seconds,
+                endpoint_config,
+                name,
+                timestamp,
+                container_info,
             )
-            readings.extend(endpoint_readings)
-        except Exception:
+            for endpoint_config in endpoints
+        ],
+        return_exceptions=True,
+    )
+    for endpoint_config, result in zip(endpoints, results):
+        if isinstance(result, Exception):
             LOGGER.warning(
-                "API endpoint collection failed name=%s endpoint=%s path=%s",
+                "API endpoint collection failed name=%s endpoint=%s path=%s error=%s",
                 name,
                 endpoint_config.name,
                 endpoint_config.path,
+                result,
             )
-    
+            continue
+        readings.extend(result)
+
     return readings
 
 
@@ -586,11 +658,20 @@ async def _fetch_api_endpoint(
                 auth_b64 = base64.b64encode(auth_bytes).decode("utf-8")
                 headers["Authorization"] = f"Basic {auth_b64}"
         
-        async with httpx.AsyncClient(base_url=base_url, timeout=timeout_seconds, headers=headers) as client:
+        request_timeout = httpx.Timeout(timeout_seconds, connect=min(3.0, float(timeout_seconds)))
+        async with httpx.AsyncClient(base_url=base_url, timeout=request_timeout, headers=headers) as client:
             response = await client.get(path)
             response.raise_for_status()
             data = _decode_api_response(response)
     except Exception as exc:
+        api = container_info.setdefault("api", {})
+        api.setdefault("endpoints", {})[endpoint_config.name] = {
+            "ok": False,
+            "status_code": getattr(getattr(exc, "response", None), "status_code", None),
+            "path": path,
+            "error": str(exc),
+            "connectivity_error": _is_connectivity_error(exc),
+        }
         LOGGER.warning(
             "API endpoint request failed name=%s endpoint=%s path=%s error=%s",
             source_name,
@@ -679,9 +760,19 @@ async def _fetch_api_endpoint_async(
         async with httpx.AsyncClient() as client:
             response = await client.get(f"{base_url}{endpoint_config.path}", auth=auth)
             response.raise_for_status()
-            return {"ok": True, "status_code": response.status_code, "data": _decode_api_response(response)}
+            return {
+                "ok": True,
+                "status_code": response.status_code,
+                "data": _decode_api_response(response),
+                "connectivity_error": False,
+            }
     except Exception as exc:
-        return {"ok": False, "error": str(exc), "source_name": source_name}
+        return {
+            "ok": False,
+            "error": str(exc),
+            "source_name": source_name,
+            "connectivity_error": _is_connectivity_error(exc),
+        }
 
 
 async def _probe_api_async(
@@ -710,6 +801,17 @@ async def _probe_api_async(
         async with httpx.AsyncClient() as client:
             health = await client.get(f"{base_url}/healthcheck", auth=auth)
             result["up"] = health.status_code == 200
+            if result["up"]:
+                data = _decode_api_response(health)
+                result["endpoints"]["healthcheck"] = {
+                    "ok": True,
+                    "status_code": health.status_code,
+                    "data": data,
+                }
+                extracted = extract_api_metrics("healthcheck", "health", data)
+                result["metrics"].update(extracted["metrics"])
+                result["labels"].update(extracted["labels"])
+                result["management"].setdefault("health", {})["healthcheck"] = _redact_api_value(data)
     except Exception:
         return result
     if not result["up"]:
@@ -719,8 +821,12 @@ async def _probe_api_async(
     for endpoint in endpoints:
         if endpoint.path in BLOCKED_ENDPOINTS or endpoint.path in SKIPPED_ENDPOINTS:
             continue
+        if endpoint.path == "/healthcheck":
+            continue
         endpoint_result = await _fetch_api_endpoint_async(base_url, endpoint, auth, source_name, True)
         result["endpoints"][endpoint.name] = endpoint_result
+        if not endpoint_result.get("ok") and endpoint_result.get("connectivity_error"):
+            break
         if endpoint_result.get("ok"):
             data = endpoint_result.get("data")
             category = getattr(endpoint, "category", None) or endpoint.metric_prefix

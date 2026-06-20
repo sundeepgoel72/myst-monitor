@@ -13,7 +13,7 @@ class ServiceConfig(BaseModel):
     name: str = "mystmon"
     poll_interval_seconds: int = Field(default=21600, ge=60)
     request_timeout_seconds: int = Field(default=10, ge=1)
-    data_dir: str = "/data/mystmon"
+    data_dir: str = "data"
     log_window_seconds: int = Field(default=21600, ge=60)
     timezone: str = "Asia/Kolkata"
 
@@ -158,6 +158,7 @@ class TequilApiEndpointConfig(BaseModel):
 
 class MystCollectorConfig(BaseModel):
     enabled: bool = True
+    # Deprecated legacy fields retained only for backward compatibility.
     local_host: str = "localhost"
     docker_socket: str = "unix:///var/run/docker.sock"
     container_name_patterns: list[str] = Field(default_factory=lambda: [r"^myst(\.|$)", r"^myst[0-9]"])
@@ -165,12 +166,12 @@ class MystCollectorConfig(BaseModel):
     api_default_port: int = 4050
     api_username: str | None = None
     api_password_env: str | None = None
+    fallback_targets_enabled: bool = False
     api_endpoints: list[TequilApiEndpointConfig] = Field(
         default_factory=lambda: [
             TequilApiEndpointConfig(name="healthcheck", path="/healthcheck", metric_prefix="health", category="health"),
             TequilApiEndpointConfig(name="identities", path="/identities", metric_prefix="identities", category="identities"),
             TequilApiEndpointConfig(name="services", path="/services", metric_prefix="services", category="services"),
-            TequilApiEndpointConfig(name="proposals", path="/proposals", metric_prefix="proposals", category="proposals"),
             TequilApiEndpointConfig(name="sessions", path="/sessions", metric_prefix="sessions", category="sessions"),
             TequilApiEndpointConfig(name="sessions_connectivity_status", path="/sessions-connectivity-status", metric_prefix="sessions", category="sessions"),
             TequilApiEndpointConfig(name="session_stats_dailies", path="/sessions/stats-daily", metric_prefix="sessions", category="sessions"),
@@ -253,14 +254,14 @@ class MystNodesPortalAccountConfig(BaseModel):
 
 
 class OutputConfig(BaseModel):
-    latest_json_path: str = "/data/mystmon/latest.json"
-    snmp_extend_path: str = "/data/mystmon/snmp_extend.txt"
-    csv_export_path: str = "/data/mystmon/csv"
+    latest_json_path: str = "data/latest.json"
+    snmp_extend_path: str = "data/snmp_extend.txt"
+    csv_export_path: str = "data/csv"
 
 
 class HistoryConfig(BaseModel):
     enabled: bool = True
-    db_path: str = "/data/mystmon/mystmon.db"
+    db_path: str = "data/mystmon.db"
 
 
 class TelegramConfig(BaseModel):
@@ -379,15 +380,19 @@ def load_config(path: str | os.PathLike[str] | None = None) -> MystMonConfig:
     if inline_config:
         raw_inline: dict[str, Any] = yaml.safe_load(inline_config) or {}
         config = MystMonConfig.model_validate(raw_inline)
+        _resolve_relative_paths(config, Path.cwd())
         _validate_required_config(config)
         return config
 
     config_path = Path(path or os.getenv("MYSTMON_CONFIG", "config.yaml"))
     raw = _load_yaml_file(config_path)
     if raw is None:
-        return MystMonConfig()
+        config = MystMonConfig()
+        _resolve_relative_paths(config, Path.cwd())
+        return config
 
     config = MystMonConfig.model_validate(raw)
+    _resolve_relative_paths(config, config_path.resolve().parent)
     _validate_required_config(config)
     return config
 
@@ -397,3 +402,17 @@ def _load_yaml_file(path: Path) -> dict[str, Any] | None:
         return None
     with path.open("r", encoding="utf-8") as handle:
         return yaml.safe_load(handle) or {}
+
+
+def _resolve_relative_paths(config: MystMonConfig, base_dir: Path) -> None:
+    def _resolve(value: str) -> str:
+        path = Path(value)
+        if path.is_absolute():
+            return str(path)
+        return str((base_dir / path).resolve())
+
+    config.service.data_dir = _resolve(config.service.data_dir)
+    config.outputs.latest_json_path = _resolve(config.outputs.latest_json_path)
+    config.outputs.snmp_extend_path = _resolve(config.outputs.snmp_extend_path)
+    config.outputs.csv_export_path = _resolve(config.outputs.csv_export_path)
+    config.history.db_path = _resolve(config.history.db_path)

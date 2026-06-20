@@ -11,9 +11,8 @@ def write_collection_csv_exports(snapshot: dict[str, Any], data_dir: str, collec
     output_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     collected_at = str(snapshot.get("generated_at", ""))
-    active_collection_id = _active_collection_id(output_dir, collection_id)
 
-    summary_path = output_dir / f"collection_{active_collection_id}_summary.csv"
+    summary_path = output_dir / "summary.csv"
     _write_rows(
         summary_path,
         ["collected_at", "field", "value"],
@@ -21,7 +20,7 @@ def write_collection_csv_exports(snapshot: dict[str, Any], data_dir: str, collec
     )
     written.append(summary_path)
 
-    accounts_path = output_dir / f"collection_{active_collection_id}_mystnodes_accounts.csv"
+    accounts_path = output_dir / "mystnodes_accounts.csv"
     _write_rows(
         accounts_path,
         [
@@ -43,7 +42,7 @@ def write_collection_csv_exports(snapshot: dict[str, Any], data_dir: str, collec
     )
     written.append(accounts_path)
 
-    portal_nodes_path = output_dir / f"collection_{active_collection_id}_mystnodes_portal_nodes.csv"
+    portal_nodes_path = output_dir / "mystnodes_portal_nodes.csv"
     _write_rows(
         portal_nodes_path,
         [
@@ -68,7 +67,7 @@ def write_collection_csv_exports(snapshot: dict[str, Any], data_dir: str, collec
     )
     written.append(portal_nodes_path)
 
-    local_runtime_nodes_path = output_dir / f"collection_{active_collection_id}_mystnodes_local_runtime_nodes.csv"
+    local_runtime_nodes_path = output_dir / "mystnodes_local_runtime_nodes.csv"
     _write_rows(
         local_runtime_nodes_path,
         [
@@ -93,7 +92,6 @@ def write_collection_csv_exports(snapshot: dict[str, Any], data_dir: str, collec
             "api_sessions_1d",
             "api_sessions_7d",
             "api_nat_type",
-            "api_proposals_count",
             "api_sessions_total_items",
             "api_sessions_agg_count",
             "api_sessions_agg_consumers",
@@ -123,7 +121,7 @@ def write_collection_csv_exports(snapshot: dict[str, Any], data_dir: str, collec
     )
     written.append(local_runtime_nodes_path)
 
-    local_hosts_path = output_dir / f"collection_{active_collection_id}_mystnodes_local_hosts.csv"
+    local_hosts_path = output_dir / "mystnodes_local_hosts.csv"
     _write_rows(
         local_hosts_path,
         [
@@ -292,7 +290,6 @@ def _local_runtime_node_rows(snapshot: dict[str, Any]) -> list[tuple[str, ...]]:
                 _csv_number(_get_nested(api, ["metrics", "provider_sessions_1d_count"], "")),
                 _csv_number(_get_nested(api, ["metrics", "provider_sessions_7d_count"], "")),
                 str(_get_nested(api, ["endpoints", "nat_type", "data", "type"], "")),
-                str(len((_get_nested(api, ["endpoints", "proposals", "data", "proposals"], []) or []))),
                 _csv_number(sessions.get("total_items")),
                 _csv_number(session_stats.get("count")),
                 _csv_number(session_stats.get("count_consumers")),
@@ -420,21 +417,6 @@ def _write_rows(path: Path, headers: list[str], rows) -> None:
         if not append:
             writer.writerow(headers)
         writer.writerows(row_list)
-
-
-def _active_collection_id(output_dir: Path, collection_id: int) -> int:
-    existing_ids: list[int] = []
-    for path in output_dir.glob("collection_*_summary.csv"):
-        parts = path.stem.split("_")
-        if len(parts) < 3:
-            continue
-        try:
-            existing_ids.append(int(parts[1]))
-        except ValueError:
-            continue
-    if existing_ids:
-        return max(existing_ids)
-    return collection_id
 
 
 def _migrate_existing_rows(rows: list[list[str]], existing_headers: list[str], headers: list[str]) -> list[list[str]]:

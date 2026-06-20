@@ -58,7 +58,6 @@ def _sample_snapshot() -> dict:
                     "status_code": 200,
                     "identity": "id-1",
                     "endpoints": {
-                        "proposals": {"data": {"proposals": [{"provider_id": "p1"}, {"provider_id": "p2"}]}},
                         "sessions": {"data": {"total_items": 3}},
                         "sessions_connectivity_status": {"data": {"entries": [{"code": 1000}, {"code": 2003}]}},
                         "session_stats_aggregated": {"data": {"stats": {
@@ -112,19 +111,19 @@ def test_write_collection_csv_exports_creates_sectioned_files(tmp_path: Path) ->
 
     names = {path.name for path in written}
     assert names == {
-        "collection_7_summary.csv",
-        "collection_7_mystnodes_accounts.csv",
-        "collection_7_mystnodes_portal_nodes.csv",
-        "collection_7_mystnodes_local_runtime_nodes.csv",
-        "collection_7_mystnodes_local_hosts.csv",
+        "summary.csv",
+        "mystnodes_accounts.csv",
+        "mystnodes_portal_nodes.csv",
+        "mystnodes_local_runtime_nodes.csv",
+        "mystnodes_local_hosts.csv",
     }
     assert {path.name for path in second_written} == names
 
-    summary = list(csv.reader((tmp_path / "collection_7_summary.csv").open()))
+    summary = list(csv.reader((tmp_path / "summary.csv").open()))
     assert summary[0] == ["collected_at", "field", "value"]
     assert summary.count(["2026-06-18T10:42:36.397201+00:00", "count.mystnodes", "2"]) == 2
 
-    accounts = list(csv.reader((tmp_path / "collection_7_mystnodes_accounts.csv").open()))
+    accounts = list(csv.reader((tmp_path / "mystnodes_accounts.csv").open()))
     assert accounts[0] == [
         "collected_at",
         "account",
@@ -149,14 +148,14 @@ def test_write_collection_csv_exports_creates_sectioned_files(tmp_path: Path) ->
     assert accounts[1][10] == "alpine"
     assert len(accounts) == 3
 
-    portal_nodes = list(csv.reader((tmp_path / "collection_7_mystnodes_portal_nodes.csv").open()))
+    portal_nodes = list(csv.reader((tmp_path / "mystnodes_portal_nodes.csv").open()))
     assert portal_nodes[0][0:6] == ["collected_at", "account", "id", "identity", "name", "local_ip"]
     assert portal_nodes[1][1] == "acct-a"
     assert portal_nodes[1][2] == "n1"
     assert portal_nodes[1][7] == "1"
     assert len(portal_nodes) == 3
 
-    local_runtime_nodes = list(csv.reader((tmp_path / "collection_7_mystnodes_local_runtime_nodes.csv").open()))
+    local_runtime_nodes = list(csv.reader((tmp_path / "mystnodes_local_runtime_nodes.csv").open()))
     assert local_runtime_nodes[0][0:6] == ["collected_at", "host", "container_name", "portal_account", "portal_identity", "portal_node_name"]
     idx = {name: i for i, name in enumerate(local_runtime_nodes[0])}
     row = local_runtime_nodes[1]
@@ -166,7 +165,6 @@ def test_write_collection_csv_exports_creates_sectioned_files(tmp_path: Path) ->
     assert row[idx["api_up"]] == "1"
     assert row[idx["api_provider_quality"]] == "2.5"
     assert row[idx["api_sessions_7d"]] == "2"
-    assert row[idx["api_proposals_count"]] == "2"
     assert row[idx["api_sessions_total_items"]] == "3"
     assert row[idx["api_sessions_agg_count"]] == "11"
     assert row[idx["api_payment_hermes_percent"]] == "0.2000"
@@ -179,7 +177,7 @@ def test_write_collection_csv_exports_creates_sectioned_files(tmp_path: Path) ->
     assert row[idx["api_config_discovery_type"]] == '["api"]'
     assert len(local_runtime_nodes) == 3
 
-    local_hosts = list(csv.reader((tmp_path / "collection_7_mystnodes_local_hosts.csv").open()))
+    local_hosts = list(csv.reader((tmp_path / "mystnodes_local_hosts.csv").open()))
     assert local_hosts[0] == [
         "collected_at",
         "host",
@@ -201,7 +199,7 @@ def test_write_collection_csv_exports_preserves_local_timezone_timestamp(tmp_pat
 
     write_collection_csv_exports(snapshot, str(tmp_path), collection_id=7)
 
-    summary = list(csv.reader((tmp_path / "collection_7_summary.csv").open()))
+    summary = list(csv.reader((tmp_path / "summary.csv").open()))
     assert summary[1][0] == "2026-06-18T16:12:36.397201+05:30"
 
 
@@ -246,7 +244,7 @@ def test_write_collection_csv_exports_prefers_portal_local_matches_for_local_nod
 
     write_collection_csv_exports(snapshot, str(tmp_path), collection_id=7)
 
-    local_runtime_nodes = list(csv.reader((tmp_path / "collection_7_mystnodes_local_runtime_nodes.csv").open()))
+    local_runtime_nodes = list(csv.reader((tmp_path / "mystnodes_local_runtime_nodes.csv").open()))
     assert len(local_runtime_nodes) == 2
     assert local_runtime_nodes[1][1] == "192.168.1.10"
     assert local_runtime_nodes[1][2] == "myst.1.x"
@@ -254,7 +252,7 @@ def test_write_collection_csv_exports_prefers_portal_local_matches_for_local_nod
     assert local_runtime_nodes[1][4] == "id-1"
     assert local_runtime_nodes[1][17] == "2.5"
 
-    local_hosts = list(csv.reader((tmp_path / "collection_7_mystnodes_local_hosts.csv").open()))
+    local_hosts = list(csv.reader((tmp_path / "mystnodes_local_hosts.csv").open()))
     assert len(local_hosts) == 2
     assert local_hosts[1][1] == "192.168.1.10"
     assert local_hosts[1][2] == "1"

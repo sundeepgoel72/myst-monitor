@@ -39,6 +39,7 @@ def create_ui_router(
     @router.get(config.ui.path, response_class=HTMLResponse, include_in_schema=False)
     async def dashboard(request: Request) -> Response:
         return templates.TemplateResponse(
+            request,
             "dashboard.html",
             _base_context(request) | {"page": "dashboard"},
         )
@@ -46,6 +47,7 @@ def create_ui_router(
     @router.get(f"{config.ui.path}/fleet", response_class=HTMLResponse, include_in_schema=False)
     async def fleet(request: Request) -> Response:
         return templates.TemplateResponse(
+            request,
             "fleet.html",
             _base_context(request) | {"page": "fleet"},
         )
@@ -53,6 +55,7 @@ def create_ui_router(
     @router.get(f"{config.ui.path}/node/{{node_key}}", response_class=HTMLResponse, include_in_schema=False)
     async def node_detail(request: Request, node_key: str) -> Response:
         return templates.TemplateResponse(
+            request,
             "node_detail.html",
             _base_context(request) | {"page": "node", "node_key": node_key},
         )
@@ -60,6 +63,7 @@ def create_ui_router(
     @router.get(f"{config.ui.path}/history", response_class=HTMLResponse, include_in_schema=False)
     async def history_view(request: Request) -> Response:
         return templates.TemplateResponse(
+            request,
             "history.html",
             _base_context(request) | {"page": "history"},
         )
@@ -67,6 +71,7 @@ def create_ui_router(
     @router.get(f"{config.ui.path}/settings", response_class=HTMLResponse, include_in_schema=False)
     async def settings(request: Request) -> Response:
         return templates.TemplateResponse(
+            request,
             "settings.html",
             _base_context(request) | {"page": "settings"},
         )

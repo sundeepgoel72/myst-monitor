@@ -22,6 +22,7 @@ import httpx
 from mystmon.config import MystNodesPortalAccountConfig, MystNodesPortalEndpointConfig
 
 LOGGER = logging.getLogger(__name__)
+NODE_FOLLOWUP_CONCURRENCY = 4
 
 
 async def collect_mystnodes_portal_accounts(
@@ -348,12 +349,39 @@ async def _collect_node_followups(
         await _throttle(config)
         details["totals"] = await _fetch_dynamic(client, config, "node_totals", "/api/v1/metrics/node-totals", headers, params)
 
-    for node in nodes:
+    semaphore = asyncio.Semaphore(NODE_FOLLOWUP_CONCURRENCY)
+    tasks = [
+        _collect_single_node_followup(client, config, headers, node, semaphore)
+        for node in nodes
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for node, result in zip(nodes, results):
         node_id = str(node.get("id") or "")
-        identity = str(node.get("identity") or "")
-        node_key = identity or node_id
-        if not node_key:
+        if not node_id:
             continue
+        if isinstance(result, Exception):
+            LOGGER.error("MystNodes portal node follow-up failed node_id=%s error=%s", node_id, result)
+            details["nodes"][node_id] = {"error": str(result)}
+            continue
+        if result is not None:
+            details["nodes"][node_id] = result
+    return details
+
+
+async def _collect_single_node_followup(
+    client: httpx.AsyncClient,
+    config: MystNodesPortalAccountConfig,
+    headers: Dict[str, str],
+    node: Dict[str, Any],
+    semaphore: asyncio.Semaphore,
+) -> Dict[str, Any] | None:
+    node_id = str(node.get("id") or "")
+    identity = str(node.get("identity") or "")
+    node_key = identity or node_id
+    if not node_key:
+        return None
+
+    async with semaphore:
         node_result: Dict[str, Any] = {}
         if config.node_detail_enabled:
             await _throttle(config)
@@ -361,15 +389,13 @@ async def _collect_node_followups(
         if config.node_services_enabled:
             await _throttle(config)
             node_result["services"] = await _fetch_dynamic(client, config, "node_services", f"/api/v2/node/{node_key}/services", headers)
-        # Collect additional metrics for enhanced monitoring
         await _throttle(config)
         node_result["sessions"] = await _fetch_dynamic(client, config, "node_sessions", f"/api/v2/node/{node_key}/sessions", headers)
         await _throttle(config)
         node_result["earnings"] = await _fetch_dynamic(client, config, "node_earnings", f"/api/v2/node/{node_key}/earnings", headers)
         await _throttle(config)
         node_result["transferred"] = await _fetch_dynamic(client, config, "node_transferred", f"/api/v2/node/{node_key}/transferred", headers)
-        details["nodes"][node_id] = node_result
-    return details
+        return node_result
 
 
 async def _throttle(config: MystNodesPortalAccountConfig) -> None:

@@ -19,7 +19,7 @@ from mystmon.collectors.myst import (
     collect_myst_nodes_async,
     extract_api_metrics,
 )
-from mystmon.config import MystCollectorConfig, MystContainerConfig, MystRemoteHostConfig
+from mystmon.config import MystCollectorConfig, MystContainerConfig, MystRemoteHostConfig, TequilApiEndpointConfig
 
 
 def _install_fake_docker(monkeypatch, containers):
@@ -42,6 +42,7 @@ def _install_fake_docker(monkeypatch, containers):
 def test_collect_myst_nodes_returns_local_and_remote_nodes(tmp_path) -> None:
     config = MystCollectorConfig(
         enabled=True,
+        fallback_targets_enabled=True,
         local_host="localhost",
         docker_socket="unix:///var/run/docker.sock",
         container_name_patterns=[r"^myst(\.|$)"],
@@ -138,6 +139,7 @@ def test_node_display_name_falls_back_to_container_name() -> None:
 def test_collect_remote_host_nodes_logs_missing_password(monkeypatch, caplog) -> None:
     config = MystCollectorConfig(
         enabled=True,
+        fallback_targets_enabled=True,
         local_host="localhost",
         docker_socket="unix:///var/run/docker.sock",
         container_name_patterns=[r"^myst(\.|$)"],
@@ -162,6 +164,7 @@ def test_collect_remote_host_nodes_logs_missing_password(monkeypatch, caplog) ->
 def test_collect_remote_host_nodes_logs_timeout(monkeypatch, caplog) -> None:
     config = MystCollectorConfig(
         enabled=True,
+        fallback_targets_enabled=True,
         local_host="localhost",
         docker_socket="unix:///var/run/docker.sock",
         container_name_patterns=[r"^myst(\.|$)"],
@@ -267,6 +270,7 @@ def test_container_snapshot_uses_configured_api_host(monkeypatch) -> None:
 
     config = MystCollectorConfig(
         enabled=True,
+        fallback_targets_enabled=True,
         local_host="localhost",
         docker_socket="unix:///var/run/docker.sock",
         container_name_patterns=[r"^myst(\.|$)"],
@@ -325,6 +329,7 @@ def test_collect_remote_host_nodes_uses_configured_tequilapi_port(monkeypatch) -
 
     config = MystCollectorConfig(
         enabled=True,
+        fallback_targets_enabled=True,
         local_host="localhost",
         docker_socket="unix:///var/run/docker.sock",
         container_name_patterns=[r"^myst(\.|$)"],
@@ -384,6 +389,7 @@ def test_collect_remote_host_nodes_prefers_configured_api_host_for_matching_netw
 
     config = MystCollectorConfig(
         enabled=True,
+        fallback_targets_enabled=True,
         local_host="localhost",
         docker_socket="unix:///var/run/docker.sock",
         container_name_patterns=[r"^myst(\.|$)"],
@@ -418,6 +424,7 @@ def test_collect_remote_host_nodes_prefers_configured_api_host_for_matching_netw
 def test_api_auth_returns_none_when_not_configured() -> None:
     config = MystCollectorConfig(
         enabled=True,
+        fallback_targets_enabled=True,
         local_host="localhost",
         docker_socket="unix:///var/run/docker.sock",
         container_name_patterns=[r"^myst(\.|$)"],
@@ -434,6 +441,7 @@ def test_api_auth_returns_none_when_not_configured() -> None:
 def test_api_auth_returns_credentials_when_configured() -> None:
     config = MystCollectorConfig(
         enabled=True,
+        fallback_targets_enabled=True,
         local_host="localhost",
         docker_socket="unix:///var/run/docker.sock",
         container_name_patterns=[r"^myst(\.|$)"],
@@ -530,6 +538,7 @@ def test_tequilapi_probe_does_not_fetch_openapi_schema(monkeypatch) -> None:
 
     config = MystCollectorConfig(
         enabled=True,
+        fallback_targets_enabled=True,
         local_host="localhost",
         docker_socket="unix:///var/run/docker.sock",
         container_name_patterns=[r"^myst(\.|$)"],
@@ -641,6 +650,92 @@ def test_tequilapi_blocked_endpoints_are_not_called(monkeypatch) -> None:
     
     # Check that healthcheck was called
     assert "/healthcheck" in called_paths
+
+
+def test_probe_api_skips_all_followup_endpoints_when_healthcheck_fails(monkeypatch) -> None:
+    from mystmon.collectors.myst import _probe_api
+
+    called_paths: list[str] = []
+
+    async def fake_get(self, path, *args, **kwargs):
+        called_paths.append(path)
+        if path == "/healthcheck":
+            raise httpx.ConnectTimeout("timed out")
+        raise AssertionError(f"unexpected endpoint call after connectivity failure: {path}")
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    config = MystCollectorConfig(
+        enabled=True,
+        api_probe_enabled=True,
+        api_endpoints=[
+            TequilApiEndpointConfig(name="healthcheck", path="/healthcheck", metric_prefix="health", category="health"),
+            TequilApiEndpointConfig(name="identities", path="/identities", metric_prefix="identities", category="identities"),
+            TequilApiEndpointConfig(name="sessions", path="/sessions", metric_prefix="sessions", category="sessions"),
+        ],
+    )
+
+    container_info = {"name": "test-node", "host": "127.0.0.1", "warnings": []}
+    readings = asyncio.run(_probe_api("http://127.0.0.1:4050", config, 5, container_info))
+
+    assert [reading.metric_name for reading in readings] == ["api_up"]
+    assert called_paths == ["/healthcheck"]
+    assert container_info["status"] == "unreachable"
+    endpoint = container_info["api"]["endpoints"]["healthcheck"]
+    assert endpoint["ok"] is False
+    assert endpoint["error"]
+
+
+def test_probe_api_async_stops_after_connectivity_failure(monkeypatch) -> None:
+    from mystmon.collectors.myst import _probe_api_async
+
+    called_urls: list[str] = []
+
+    async def fake_get(self, url, timeout=None, auth=None):
+        called_urls.append(url)
+        path = url.split(":4050")[1]
+        if path == "/healthcheck":
+            class Response:
+                status_code = 200
+                headers = {"content-type": "application/json"}
+
+                def raise_for_status(self) -> None:
+                    return None
+
+                def json(self):
+                    return {"uptime": "1h", "version": "1.2.3"}
+
+            return Response()
+        if path == "/identities":
+            raise httpx.ConnectError("unreachable")
+        raise AssertionError(f"unexpected endpoint call after connectivity failure: {path}")
+
+    monkeypatch.setattr("httpx.AsyncClient.get", fake_get)
+
+    config = MystCollectorConfig(
+        enabled=True,
+        api_probe_enabled=True,
+        api_endpoints=[
+            TequilApiEndpointConfig(name="healthcheck", path="/healthcheck", metric_prefix="health", category="health"),
+            TequilApiEndpointConfig(name="identities", path="/identities", metric_prefix="identities", category="identities"),
+            TequilApiEndpointConfig(name="sessions", path="/sessions", metric_prefix="sessions", category="sessions"),
+        ],
+    )
+
+    result = asyncio.run(
+        _probe_api_async(
+            "127.0.0.1",
+            "test-node",
+            {"4050/tcp": [{"HostPort": "4050"}]},
+            config,
+        )
+    )
+
+    assert [url.split(":4050")[1] for url in called_urls] == ["/healthcheck", "/identities"]
+    assert result["up"] is True
+    assert "healthcheck" in result["endpoints"]
+    assert result["endpoints"]["identities"]["ok"] is False
+    assert result["endpoints"]["identities"]["connectivity_error"] is True
 
 
 def test_tequilapi_data_redaction_works() -> None:

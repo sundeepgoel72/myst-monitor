@@ -30,7 +30,7 @@ def test_myst_defaults_use_known_build_host() -> None:
     config = MystMonConfig()
 
     assert config.myst.enabled is True
-    assert config.outputs.latest_json_path == "/data/mystmon/latest.json"
+    assert config.outputs.latest_json_path == "data/latest.json"
 
 
 def test_inline_config_yaml_takes_precedence(monkeypatch, tmp_path) -> None:
