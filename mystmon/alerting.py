@@ -110,8 +110,9 @@ class AlertingRule:
 
 
 class AlertManager:
-    def __init__(self, config: MystMonConfig):
+    def __init__(self, config: MystMonConfig, store: ReadingStore = None):
         self.config = config
+        self.store = store
         self.active_alerts: dict[str, Alert] = {}
         self.alert_history: list[Alert] = []
         self.alerting_rules: List[AlertingRule] = []
@@ -432,6 +433,10 @@ class AlertManager:
                     group.alerts.append(alert)
                     self.alert_groups[group_id] = group
                 
+                # Persist alert if store is available
+                if self.store:
+                    self.store.persist_alert(alert)
+                
                 alerts.append(alert)
         return alerts
     
@@ -443,6 +448,9 @@ class AlertManager:
             if alert.state == AlertState.FIRING:
                 alert.state = AlertState.RESOLVED
                 alert.ends_at = now
+                # Persist resolved alert
+                if self.store:
+                    self.store.persist_alert(alert)
         
         # Evaluate all readings
         all_alerts = []
@@ -471,6 +479,9 @@ class AlertManager:
             alert.state = AlertState.ACKNOWLEDGED
             alert.acknowledged_at = datetime.now()
             alert.acknowledged_by = acknowledged_by
+            # Persist acknowledged alert
+            if self.store:
+                self.store.persist_alert(alert)
             return True
         return False
     
@@ -480,6 +491,9 @@ class AlertManager:
             alert = self.active_alerts[alert_id]
             alert.state = AlertState.SUPPRESSED
             alert.suppressed_until = datetime.now() + duration
+            # Persist suppressed alert
+            if self.store:
+                self.store.persist_alert(alert)
             return True
         return False
     
@@ -493,14 +507,18 @@ class AlertManager:
     
     def get_alert_history(self, limit: int = 100, offset: int = 0) -> List[Alert]:
         """Get alert history with pagination."""
-        # Return the most recent alerts from history with pagination
-        start = len(self.alert_history) - offset - limit
-        end = len(self.alert_history) - offset
-        if start < 0:
-            start = 0
-        if end > len(self.alert_history):
-            end = len(self.alert_history)
-        return self.alert_history[start:end] if start < end else []
+        if self.store:
+            # Get from database if store is available
+            return self.store.get_alert_history(limit=limit, offset=offset)
+        else:
+            # Return the most recent alerts from history with pagination
+            start = len(self.alert_history) - offset - limit
+            end = len(self.alert_history) - offset
+            if start < 0:
+                start = 0
+            if end > len(self.alert_history):
+                end = len(self.alert_history)
+            return self.alert_history[start:end] if start < end else []
     
     def get_alert_groups(self) -> Dict[str, AlertGroup]:
         """Get all alert groups."""
@@ -518,6 +536,9 @@ class AlertManager:
                     # Suppression expired, change state back to FIRING
                     alert.state = AlertState.FIRING
                     alert.suppressed_until = None
+                    # Persist updated alert
+                    if self.store:
+                        self.store.persist_alert(alert)
         return suppressed
     
     def get_alerts_by_severity(self, severity: AlertSeverity) -> List[Alert]:
@@ -531,6 +552,6 @@ class AlertManager:
         return []
 
 
-def create_default_alert_manager(config: MystMonConfig) -> AlertManager:
+def create_default_alert_manager(config: MystMonConfig, store: ReadingStore = None) -> AlertManager:
     """Create an alert manager with default rules."""
-    return AlertManager(config)
+    return AlertManager(config, store)
