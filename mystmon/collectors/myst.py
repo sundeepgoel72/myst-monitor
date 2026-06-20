@@ -1,8 +1,9 @@
 """Mysterium node collector for retrieving metrics from TequilAPI endpoints.
 
 This module provides functionality to collect metrics from Mysterium nodes
-running on configured local hosts or remote hosts. It handles explicit
-host-based TequilAPI probing and metric collection from various endpoints.
+using information derived from the MystNodes portal rather than local Docker
+discovery. It handles explicit host-based TequilAPI probing and metric collection
+from various endpoints.
 """
 
 from __future__ import annotations
@@ -40,8 +41,6 @@ BLOCKED_ENDPOINTS = {
     "/connection/manual",
     "/connection/shutdown",
     "/connection/location",
-    "/connection/proxy/location",
-    "/location",
     "/nat/type",
     "/config/user",
     "/config/set",
@@ -101,7 +100,7 @@ DEFAULT_ENDPOINTS = [
 
 
 async def collect_myst(config: MystCollectorConfig, timeout_seconds: int) -> List[Reading]:
-    """Collect metrics from Mysterium nodes.
+    """Collect metrics from Mysterium nodes based on portal-derived information.
     
     Args:
         config: Collector configuration
@@ -112,12 +111,7 @@ async def collect_myst(config: MystCollectorConfig, timeout_seconds: int) -> Lis
     """
     readings: List[Reading] = []
     
-    # Collect from configured local runtimes on WSL/host networking.
-    if config.enabled:
-        container_readings = await _collect_local_containers(config, timeout_seconds)
-        readings.extend(container_readings)
-    
-    # Collect from remote hosts
+    # Collect from portal-derived remote hosts
     remote_readings = await _collect_remote_hosts(config, timeout_seconds)
     readings.extend(remote_readings)
     
@@ -170,54 +164,8 @@ def render_myst_snapshot(snapshot: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-async def _collect_local_containers(config: MystCollectorConfig, timeout_seconds: int) -> List[Reading]:
-    """Collect metrics from explicitly configured local runtimes.
-
-    Local discovery is config-driven only. Docker is reserved for packaging
-    and deployment and is not used as a discovery source.
-    """
-    readings: List[Reading] = []
-    for container_config in config.containers:
-        if not _matches_container_patterns(container_config.name, config.container_name_patterns):
-            continue
-
-        host = container_config.host or config.local_host
-        port = container_config.tequilapi_port or config.api_default_port
-        host_info = _configured_runtime_info(container_config, host)
-
-        if config.api_probe_enabled:
-            base_url = f"http://{host}:{port}"
-            readings.extend(await _probe_api(base_url, config, timeout_seconds, host_info))
-        else:
-            readings.extend(_container_readings(host_info, host_info["networks"], host_info["log_counts"]))
-    return readings
-
-
-def _configured_runtime_info(container_config: MystContainerConfig, host: str) -> Dict[str, Any]:
-    return {
-        "name": container_config.name,
-        "container_name": container_config.name,
-        "host": host,
-        "running": None,
-        "status": "unknown",
-        "restart_count": 0,
-        "uptime_seconds": None,
-        "created_at": None,
-        "networks": [
-            {
-                "name": "host",
-                "ip_address": host,
-                "gateway": None,
-                "mac_address": None,
-            }
-        ],
-        "log_counts": {},
-        "warnings": ["configured_local_runtime"],
-    }
-
-
 async def _collect_remote_hosts(config: MystCollectorConfig, timeout_seconds: int) -> List[Reading]:
-    """Collect metrics from remote hosts.
+    """Collect metrics from remote hosts derived from portal information.
     
     Args:
         config: Collector configuration
@@ -275,259 +223,6 @@ async def _collect_remote_host(
     # Probe TequilAPI
     api_readings = await _probe_api(base_url, collector_config, timeout_seconds, host_info)
     return api_readings
-
-
-def _matches_container_patterns(name: str, patterns: List[str]) -> bool:
-    """Check if a container name matches any of the configured patterns.
-    
-    Args:
-        name: Container name
-        patterns: List of regex patterns
-        
-    Returns:
-        True if name matches any pattern
-    """
-    return any(re.search(pattern, name) for pattern in patterns)
-
-
-def _container_info(container) -> Dict[str, Any]:
-    """Extract basic information from a Docker container.
-    
-    Args:
-        container: Docker container object
-        
-    Returns:
-        Dictionary with container information
-    """
-    return {
-        "name": container.name,
-        "container_name": container.name,
-        "host": "localhost",
-        "running": container.status == "running",
-        "status": container.status,
-        "restart_count": _extract_restart_count(container),
-        "uptime_seconds": _calculate_uptime(container),
-        "created_at": container.attrs.get("Created"),
-    }
-
-
-def _container_networks(container) -> List[Dict[str, Any]]:
-    """Extract network information from a Docker container.
-    
-    Args:
-        container: Docker container object
-        
-    Returns:
-        List of network dictionaries
-    """
-    networks = []
-    network_settings = container.attrs.get("NetworkSettings", {})
-    for network_name, network_data in network_settings.get("Networks", {}).items():
-        networks.append({
-            "name": network_name,
-            "ip_address": network_data.get("IPAddress"),
-            "gateway": network_data.get("Gateway"),
-            "mac_address": network_data.get("MacAddress"),
-        })
-    return networks
-
-
-def _container_log_counts(container, log_window_seconds: int) -> Dict[str, int]:
-    """Count log events in the recent window.
-    
-    Args:
-        container: Docker container object
-        log_window_seconds: Time window to analyze
-        
-    Returns:
-        Dictionary with log counts by type
-    """
-    counts: Dict[str, int] = {}
-    try:
-        since = datetime.now() - timedelta(seconds=log_window_seconds)
-        logs = container.logs(since=since, stderr=True, stdout=True)
-        log_text = logs.decode("utf-8") if isinstance(logs, bytes) else str(logs)
-        counts = {
-            "error_or_warning": len(re.findall(r"\b(error|warning)\b", log_text, re.IGNORECASE)),
-            "identity_warning": log_text.count("identity") + log_text.count("Identity"),
-            "promise": log_text.count("promise") + log_text.count("Promise"),
-            "session": log_text.count("session") + log_text.count("Session"),
-        }
-    except Exception:
-        LOGGER.warning("Log analysis failed for container=%s", container.name)
-    return counts
-
-
-def _extract_restart_count(container) -> int:
-    """Extract restart count from container attributes.
-    
-    Args:
-        container: Docker container object
-        
-    Returns:
-        Restart count
-    """
-    try:
-        return int(container.attrs.get("RestartCount", 0))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _calculate_uptime(container) -> Optional[float]:
-    """Calculate container uptime in seconds.
-    
-    Args:
-        container: Docker container object
-        
-    Returns:
-        Uptime in seconds or None
-    """
-    try:
-        started_at = container.attrs.get("State", {}).get("StartedAt")
-        if not started_at:
-            return None
-        started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-        return (datetime.now(started.tzinfo) - started).total_seconds()
-    except Exception:
-        return None
-
-
-def _container_readings(
-    container_info: Dict[str, Any],
-    network_info: List[Dict[str, Any]],
-    log_counts: Dict[str, int],
-) -> List[Reading]:
-    """Create readings from container information.
-    
-    Args:
-        container_info: Container information
-        network_info: Network information
-        log_counts: Log event counts
-        
-    Returns:
-        List of readings
-    """
-    name = container_info["name"]
-    timestamp = datetime.now()
-    readings: List[Reading] = []
-    
-    # Basic container metrics
-    readings.append(Reading(
-        source_type="myst",
-        source_name=name,
-        metric_name="running",
-        value=1.0 if container_info["running"] else 0.0,
-        labels={},
-        timestamp=timestamp,
-        raw_data=container_info,
-    ))
-    
-    readings.append(Reading(
-        source_type="myst",
-        source_name=name,
-        metric_name="restart_count",
-        value=float(container_info["restart_count"]),
-        labels={},
-        timestamp=timestamp,
-        raw_data=container_info,
-    ))
-    
-    if container_info["uptime_seconds"] is not None:
-        readings.append(Reading(
-            source_type="myst",
-            source_name=name,
-            metric_name="uptime_seconds",
-            value=float(container_info["uptime_seconds"]),
-            labels={},
-            timestamp=timestamp,
-            raw_data=container_info,
-        ))
-    
-    # Log metrics
-    for log_type, count in log_counts.items():
-        readings.append(Reading(
-            source_type="myst",
-            source_name=name,
-            metric_name=f"log_{log_type}",
-            value=float(count),
-            labels={},
-            timestamp=timestamp,
-            raw_data=container_info,
-        ))
-    
-    return readings
-
-
-async def _probe_container_api(
-    container,
-    config: MystCollectorConfig,
-    timeout_seconds: int,
-    container_info: Dict[str, Any],
-    network_info: List[Dict[str, Any]],
-) -> List[Reading]:
-    """Probe TequilAPI for a container.
-    
-    Args:
-        container: Docker container object
-        config: Collector configuration
-        timeout_seconds: Request timeout in seconds
-        container_info: Container information
-        network_info: Network information
-        
-    Returns:
-        List of API readings
-    """
-    name = container_info["name"]
-    
-    # Determine API host and port
-    api_host, api_port = _determine_api_host_port(container, config, network_info)
-    if not api_host or not api_port:
-        LOGGER.debug("Could not determine API host/port for container=%s", name)
-        return []
-    
-    base_url = f"http://{api_host}:{api_port}"
-    return await _probe_api(base_url, config, timeout_seconds, container_info)
-
-
-def _determine_api_host_port(container, config: MystCollectorConfig, network_info: List[Dict[str, Any]]) -> Tuple[Optional[str], Optional[int]]:
-    """Determine the API host and port for a container.
-    
-    Args:
-        container: Docker container object
-        config: Collector configuration
-        network_info: Network information
-        
-    Returns:
-        Tuple of (host, port) or (None, None)
-    """
-    # Check for explicitly configured container
-    for container_config in config.containers:
-        if container_config.name == container.name:
-            if container_config.host and container_config.tequilapi_port:
-                return container_config.host, container_config.tequilapi_port
-            if container_config.tequilapi_port:
-                return "localhost", container_config.tequilapi_port
-    
-    # Check for expected network
-    if config.containers:
-        for container_config in config.containers:
-            if container_config.name == container.name and container_config.expected_network:
-                for network in network_info:
-                    if network["name"] == container_config.expected_network:
-                        return network["ip_address"], config.api_default_port
-    
-    # Check for port range
-    if config.containers:
-        for container_config in config.containers:
-            if container_config.name == container.name and container_config.expected_port_range:
-                # This is a simplified implementation - in practice you'd parse the range
-                return "localhost", config.api_default_port
-    
-    # Default to localhost if container is running
-    if container.status == "running":
-        return "localhost", config.api_default_port
-    
-    return None, None
 
 
 async def _probe_api(
