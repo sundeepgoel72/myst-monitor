@@ -81,6 +81,7 @@ class TequilApiEndpointConfig(BaseModel):
     metric_prefix: str
     category: str = "general"
     method: str = "GET"
+    outlier_handling: bool = False  # New field for explicit outlier handling
 
     @field_validator("method")
     @classmethod
@@ -167,6 +168,7 @@ class MystCollectorConfig(BaseModel):
     api_username: str | None = None
     api_password_env: str | None = None
     fallback_targets_enabled: bool = False
+    outlier_detection_enabled: bool = True  # New field for global outlier detection
     api_endpoints: list[TequilApiEndpointConfig] = Field(
         default_factory=lambda: [
             TequilApiEndpointConfig(name="healthcheck", path="/healthcheck", metric_prefix="health", category="health"),
@@ -208,6 +210,7 @@ class MystNodesPortalEndpointConfig(BaseModel):
     method: str = "GET"
     path: str
     params: dict[str, str | int | float | bool] = Field(default_factory=dict)
+    outlier_handling: bool = False  # New field for explicit outlier handling
 
 
 class MystNodesPortalAccountConfig(BaseModel):
@@ -226,6 +229,7 @@ class MystNodesPortalAccountConfig(BaseModel):
     node_services_enabled: bool = False
     node_totals_enabled: bool = True
     node_totals_days: int = Field(default=30, ge=1)
+    outlier_detection_enabled: bool = True  # New field for account-level outlier detection
     endpoints: list[MystNodesPortalEndpointConfig] = Field(
         default_factory=lambda: [
             MystNodesPortalEndpointConfig(name="me", path="/api/v2/me"),
