@@ -316,14 +316,17 @@ def _wallet_summary(accounts: list[dict[str, Any]]) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     total_value = 0.0
     total_known = False
+    seen_wallets: set[str] = set()
     for account in accounts:
         endpoints = account.get("endpoints") or {}
         wallet_endpoint = endpoints.get("wallet_balance")
         amount_text = _wallet_amount_text(wallet_endpoint)
         amount_value = _wallet_amount_value(amount_text)
-        if amount_value is not None:
+        wallet_key = str(account.get("wallet_address_hint") or account.get("wallet_address") or account.get("name") or "")
+        if amount_value is not None and wallet_key not in seen_wallets:
             total_value += amount_value
             total_known = True
+            seen_wallets.add(wallet_key)
         rows.append(
             {
                 "name": account.get("name"),
@@ -368,7 +371,12 @@ def _wallet_amount_text(endpoint: Any) -> str | None:
 def _wallet_amount_value(value: str | None) -> float | None:
     if value in (None, ""):
         return None
-    token = str(value).strip().split()[0].replace(',', '')
+    import re
+
+    match = re.search(r"[-+]?\d[\d,]*(?:\.\d+)?", str(value))
+    if not match:
+        return None
+    token = match.group(0).replace(',', '')
     try:
         return float(token)
     except ValueError:

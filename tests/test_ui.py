@@ -12,6 +12,7 @@ from mystmon import __version__
 from mystmon.api import create_app
 from mystmon.bootstrap import bootstrap_storage
 from mystmon.config import MystMonConfig
+from mystmon.ui import _wallet_summary
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -218,6 +219,24 @@ def test_ui_api_home(app):
     assert data["ok"] is True
     assert "wallet" in data
     assert "nodes" in data
+
+
+def test_wallet_summary_dedupes_shared_wallet_accounts() -> None:
+    summary = _wallet_summary([
+        {
+            "name": "acct-a",
+            "wallet_address_hint": "0x08B1…0c1A",
+            "endpoints": {"wallet_balance": {"ok": True, "data": {"summary": "$62.24 across 2 Chains"}}},
+        },
+        {
+            "name": "acct-b",
+            "wallet_address_hint": "0x08B1…0c1A",
+            "endpoints": {"wallet_balance": {"ok": True, "data": {"summary": "$62.24 across 2 Chains"}}},
+        },
+    ])
+
+    assert summary["total"] == "62.24"
+    assert len(summary["accounts"]) == 2
 
 
 def test_ui_api_system_info(app):
