@@ -150,11 +150,12 @@ def create_app(config: MystMonConfig | None = None) -> FastAPI:
     async def history_node(
         node: str,
         limit: int = Query(100, ge=1, le=1000),
-        offset: int = Query(0, ge=0)
+        offset: int = Query(0, ge=0),
+        hours: int | None = Query(None, ge=1, le=720)
     ) -> dict:
         if history is None:
             return {"ok": False, "reason": "history_disabled", "node": node}
-        return history.node(node=node, limit=max(1, min(limit, 1000)), offset=offset)
+        return history.node(node=node, limit=max(1, min(limit, 1000)), offset=offset, hours=hours)
 
     @app.post("/api/v1/telegram/test")
     async def telegram_test() -> dict:

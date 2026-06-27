@@ -86,6 +86,31 @@ def create_ui_router(
             "service_name": config.service.name,
         }
 
+    @router.get("/api/v1/ui/home", include_in_schema=False)
+    async def ui_home() -> dict[str, Any]:
+        if not history:
+            return {"ok": False, "reason": "history_disabled"}
+
+        latest = history._record_query("SELECT * FROM collections ORDER BY collected_at DESC, id DESC LIMIT 1")
+        if latest is None:
+            return {"ok": True, "wallet": {"total": None, "accounts": []}, "nodes": [], "collection": None}
+
+        snapshot = latest.snapshot or {}
+        mystnodes = snapshot.get("mystnodes") or {}
+        accounts = mystnodes.get("accounts") or []
+        nodes = [
+            _public_home_node(row)
+            for row in history._nodes_for_collection(latest.id).values()
+        ]
+        nodes.sort(key=lambda row: (str(row.get("node_name") or row.get("node_key") or "").lower(), str(row.get("node_key") or "").lower()))
+
+        return {
+            "ok": True,
+            "collection": {"id": latest.id, "collected_at": latest.collected_at.isoformat()},
+            "wallet": _wallet_summary(accounts),
+            "nodes": nodes,
+        }
+
     @router.get("/api/v1/collectors/status", include_in_schema=False)
     async def collectors_status() -> dict[str, Any]:
         snapshot_path = Path(config.outputs.latest_json_path)
@@ -251,6 +276,103 @@ def _collector_status(*, enabled: bool) -> dict[str, Any]:
         "nodes_collected": 0,
         "status": "pending" if enabled else "disabled",
     }
+
+
+
+def _public_home_node(row: dict[str, Any]) -> dict[str, Any]:
+    quality = row.get("quality")
+    earnings_total = row.get("earnings_total")
+    running = row.get("running")
+    online = row.get("online")
+    return {
+        "node_key": row.get("node_key") or row.get("identity") or row.get("node_name"),
+        "node_name": row.get("node_name") or row.get("container_name") or row.get("host"),
+        "identity": row.get("identity"),
+        "status": _home_status_label(online, running),
+        "running": running,
+        "online": online,
+        "quality": quality,
+        "quality_known": quality is not None,
+        "earnings_total": earnings_total,
+        "earnings_known": earnings_total is not None,
+        "restart_count": row.get("restart_count"),
+        "last_seen": row.get("collected_at"),
+    }
+
+
+def _home_status_label(online: Any, running: Any) -> str:
+    if online == 1 or online is True:
+        return "Online"
+    if online == 0 or online is False:
+        return "Offline"
+    if running == 1 or running is True:
+        return "Running"
+    if running == 0 or running is False:
+        return "Stopped"
+    return "Unknown"
+
+
+def _wallet_summary(accounts: list[dict[str, Any]]) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    total_value = 0.0
+    total_known = False
+    for account in accounts:
+        endpoints = account.get("endpoints") or {}
+        wallet_endpoint = endpoints.get("wallet_balance")
+        amount_text = _wallet_amount_text(wallet_endpoint)
+        amount_value = _wallet_amount_value(amount_text)
+        if amount_value is not None:
+            total_value += amount_value
+            total_known = True
+        rows.append(
+            {
+                "name": account.get("name"),
+                "wallet_address_hint": account.get("wallet_address_hint"),
+                "wallet_total": amount_text,
+            }
+        )
+    return {
+        "total": str(total_value) if total_known else None,
+        "accounts": rows,
+    }
+
+
+def _wallet_amount_text(endpoint: Any) -> str | None:
+    if not isinstance(endpoint, dict) or endpoint.get("ok") is False:
+        return None
+    data = endpoint.get("data")
+    if isinstance(data, dict):
+        summary = data.get("summary")
+        if summary not in (None, ""):
+            return str(summary)
+        for path in (
+            ("balance",),
+            ("availableBalance",),
+            ("current", "balance"),
+            ("current", "settlement", "human"),
+            ("current", "settlement", "amount"),
+        ):
+            value = data
+            for key in path:
+                if not isinstance(value, dict) or key not in value:
+                    value = None
+                    break
+                value = value[key]
+            if value not in (None, ""):
+                return str(value)
+    elif data not in (None, ""):
+        return str(data)
+    return None
+
+
+def _wallet_amount_value(value: str | None) -> float | None:
+    if value in (None, ""):
+        return None
+    token = str(value).strip().split()[0].replace(',', '')
+    try:
+        return float(token)
+    except ValueError:
+        return None
 
 
 def _csv_delta(current: Any, prior: Any) -> float | str:

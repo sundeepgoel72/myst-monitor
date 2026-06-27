@@ -56,7 +56,7 @@ def test_ui_dashboard(app):
     response = _get(app, "/ui")
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    assert "Dashboard" in response.text
+    assert "Home" in response.text
     assert __version__ in response.text
     assert 'data-ui-path="/ui"' in response.text
     assert "/ui/static/js/utils.js" in response.text
@@ -158,27 +158,20 @@ def test_ui_api_collectors_status_uses_configured_sources(app, tmp_path):
     assert data["collectors"]["snmp"]["status"] == "disabled"
 
 
-def test_dashboard_preserves_unknown_portal_values_in_quick_nodes():
+def test_dashboard_uses_sqlite_backed_home_endpoint():
     source = (ROOT / "mystmon/static/js/dashboard.js").read_text(encoding="utf-8")
+    template = (ROOT / "mystmon/templates/dashboard.html").read_text(encoding="utf-8")
 
-    assert "MystMonApi.historyOverall(48)" in source
-    assert "pickMetric(current, ['quality_avg'])" in source
-    assert "function isKnownNumber(value)" in source
-    assert "return typeof value === 'number' && Number.isFinite(value);" in source
-    assert "const points = Array.isArray(data) ? data.filter(isKnownNumber) : [];" in source
-    assert "if (points.length === 0)" in source
-    assert "deltaData.earnings_total" not in source
-    assert "deltaData.quality" not in source
+    assert "MystMonApi.home()" in source
+    assert "Wallet total and current node state from SQLite history." in template
+    assert "Node ID" in template
+    assert "Current Nodes" in template
 
 
-def test_dashboard_and_history_keep_missing_prior_health_unknown():
-    dashboard = (ROOT / "mystmon/static/js/dashboard.js").read_text(encoding="utf-8")
+def test_history_page_preserves_unknown_handling_copy():
     history = (ROOT / "mystmon/static/js/history.js").read_text(encoding="utf-8")
 
-    assert "No prior data" in dashboard
     assert "No prior data" in history
-    assert "pickMetric(current, ['online', 'running'])" in dashboard
-    assert "pickMetric(prior, ['online', 'running'])" in dashboard
     assert "pickMetric(current, ['online', 'running'])" in history
     assert "pickMetric(prior, ['online', 'running'])" in history
 
@@ -198,33 +191,33 @@ def test_fleet_table_and_export_preserve_unknown_portal_values():
     assert "Unknown" in source
 
 
-def test_node_detail_uses_tequilapi_management_sections():
+def test_node_detail_uses_history_presets():
     source = (ROOT / "mystmon/static/js/node_detail.js").read_text(encoding="utf-8")
     template = (ROOT / "mystmon/templates/node_detail.html").read_text(encoding="utf-8")
 
-    assert "TequilAPI Management" in template
-    assert "TequilAPI Endpoint Diagnostics" in template
-    assert "current?.provider_quality" in source
-    assert "current?.api?.management?.health?.healthcheck?.version" in source
-    assert "formatTequilLocation" in source
-    assert "current?.nat_type" in source
-    assert "current?.public_ip" in source
+    assert 'data-hours="24"' in template
+    assert 'data-hours="168"' in template
+    assert 'data-hours="720"' in template
+    assert "MystMonApi.historyNode(nodeKey, 500, 0, selectedHours)" in source
+    assert "History Rows" in template
 
 
-def test_dashboard_quick_nodes_show_tequilapi_columns():
+def test_dashboard_node_table_links_to_node_history():
     source = (ROOT / "mystmon/static/js/dashboard.js").read_text(encoding="utf-8")
     template = (ROOT / "mystmon/templates/dashboard.html").read_text(encoding="utf-8")
 
-    assert "API" in template
-    assert "NAT" in template
-    assert "Public IP" in template
-    assert "Services" in template
-    assert "Sessions" in template
-    assert "api_enabled" in source
-    assert "api_nat_type" in source
-    assert "api_public_ip" in source
-    assert "api_services_running" in source
-    assert "api_sessions_1d" in source
+    assert "/node/${encodeURIComponent(node.node_key || nodeId)}" in source
+    assert "Node ID" in template
+    assert "Last Seen" in template
+
+
+def test_ui_api_home(app):
+    response = _get(app, "/api/v1/ui/home")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert "wallet" in data
+    assert "nodes" in data
 
 
 def test_ui_api_system_info(app):

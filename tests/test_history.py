@@ -153,6 +153,19 @@ def test_history_exposes_overall_and_node_sqlite_views(tmp_path) -> None:
     assert node_history["history"][0]["earnings_total"] == 12.5
 
 
+def test_history_node_supports_hours_filter(tmp_path) -> None:
+    bootstrap_storage(str(tmp_path / "mystmon.db"), str(tmp_path / "latest.json"), str(tmp_path / "snmp_extend.txt"))
+    store = HistoryStore(str(tmp_path / "mystmon.db"), timezone_name="Asia/Kolkata")
+    store.append_snapshot(_snapshot(datetime(2026, 5, 24, 2, 0, tzinfo=UTC), earnings=10.0, quality=2.0))
+    store.append_snapshot(_snapshot(datetime(2026, 5, 25, 3, 0, tzinfo=UTC), earnings=12.5, quality=2.5))
+
+    history = store.node("Node", limit=10, hours=24)
+
+    assert history["hours"] == 24
+    assert history["count"] == 1
+    assert history["history"][0]["earnings_total"] == 12.5
+
+
 def test_history_public_nodes_include_known_flags(tmp_path) -> None:
     bootstrap_storage(str(tmp_path / "mystmon.db"), str(tmp_path / "latest.json"), str(tmp_path / "snmp_extend.txt"))
     store = HistoryStore(str(tmp_path / "mystmon.db"), timezone_name="Asia/Kolkata")

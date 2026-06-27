@@ -131,6 +131,11 @@ class HistoryStore:
         record = self._record_query("SELECT * FROM collections ORDER BY collected_at DESC, id DESC LIMIT 1")
         return _record_dict(record) if record else None
 
+    def latest_snapshot(self) -> dict[str, Any] | None:
+        """Get the full latest snapshot payload stored in SQLite."""
+        record = self._record_query("SELECT * FROM collections ORDER BY collected_at DESC, id DESC LIMIT 1")
+        return record.snapshot if record else None
+
     def overall(self, limit: int = 100) -> dict[str, Any]:
         """Get overall history with fleet summaries.
         
@@ -154,7 +159,7 @@ class HistoryStore:
             ],
         }
 
-    def nodes(self, latest_only: bool = True, limit: int = 100) -> dict[str, Any]:
+    def nodes(self, latest_only: bool = True, limit: int = 100, offset: int = 0) -> dict[str, Any]:
         """Get node data from history.
         
         Args:
@@ -164,7 +169,7 @@ class HistoryStore:
         Returns:
             Dictionary with node data
         """
-        LOGGER.debug("Fetching nodes with latest_only=%s, limit=%d", latest_only, limit)
+        LOGGER.debug("Fetching nodes with latest_only=%s, limit=%d, offset=%d", latest_only, limit, offset)
         if latest_only:
             latest = self._record_query("SELECT * FROM collections ORDER BY collected_at DESC, id DESC LIMIT 1")
             if latest is None:
@@ -183,12 +188,13 @@ class HistoryStore:
                 FROM node_metrics
                 ORDER BY collected_at DESC, node_name
                 LIMIT ?
+                OFFSET ?
                 """,
-                (limit,),
+                (limit, offset),
             ).fetchall()
         return {"ok": True, "count": len(rows), "nodes": [_public_node(dict(row)) for row in rows]}
 
-    def node(self, node: str, limit: int = 100) -> dict[str, Any]:
+    def node(self, node: str, limit: int = 100, offset: int = 0, hours: int | None = None) -> dict[str, Any]:
         """Get history for a specific node.
         
         Args:
@@ -198,28 +204,54 @@ class HistoryStore:
         Returns:
             Dictionary with node history data
         """
-        LOGGER.debug("Fetching node history for node=%s, limit=%d", node, limit)
+        LOGGER.debug("Fetching node history for node=%s, limit=%d, offset=%d, hours=%s", node, limit, offset, hours)
         pattern = f"%{node}%"
+        latest = self._record_query("SELECT * FROM collections ORDER BY collected_at DESC, id DESC LIMIT 1")
+        target = None
+        if latest is not None and hours is not None:
+            target = (latest.collected_at - timedelta(hours=hours)).isoformat()
         with self._connect() as db:
-            rows = db.execute(
-                """
-                SELECT *
-                FROM node_metrics
-                WHERE node_key = ?
-                   OR identity = ?
-                   OR node_name = ?
-                   OR node_name LIKE ?
-                   OR container_name = ?
-                ORDER BY collected_at DESC
-                LIMIT ?
-                """,
-                (node, node, node, pattern, node, limit),
-            ).fetchall()
+            if target is None:
+                rows = db.execute(
+                    """
+                    SELECT *
+                    FROM node_metrics
+                    WHERE node_key = ?
+                       OR identity = ?
+                       OR node_name = ?
+                       OR node_name LIKE ?
+                       OR container_name = ?
+                    ORDER BY collected_at DESC
+                    LIMIT ?
+                    OFFSET ?
+                    """,
+                    (node, node, node, pattern, node, limit, offset),
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    """
+                    SELECT *
+                    FROM node_metrics
+                    WHERE (
+                        node_key = ?
+                        OR identity = ?
+                        OR node_name = ?
+                        OR node_name LIKE ?
+                        OR container_name = ?
+                    )
+                    AND collected_at >= ?
+                    ORDER BY collected_at DESC
+                    LIMIT ?
+                    OFFSET ?
+                    """,
+                    (node, node, node, pattern, node, target, limit, offset),
+                ).fetchall()
         public_rows = [_public_node(dict(row)) for row in rows]
         return {
             "ok": True,
             "node": node,
             "count": len(public_rows),
+            "hours": hours,
             "history": public_rows,
         }
 

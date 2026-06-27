@@ -128,6 +128,34 @@ def test_portal_metrics_include_quality_and_earnings() -> None:
     pass
 
 
+def test_history_node_endpoint_supports_hours_filter(tmp_path: Path) -> None:
+    config = _test_config(tmp_path)
+    app = create_app(config)
+    snapshot_path = Path(config.outputs.latest_json_path)
+    db_path = Path(config.history.db_path)
+
+    from mystmon.history import HistoryStore
+    store = HistoryStore(str(db_path), timezone_name=config.service.timezone)
+    store.append_snapshot({
+        "generated_at": "2026-06-25T10:00:00+05:30",
+        "collection_counts": {"myst": 1, "mystnodes": 0, "prometheus": 0, "snmp": 0},
+        "nodes": [{"name": "Node One", "running": True, "restart_count": 0, "uptime_seconds": 100, "log_counts": {"error_or_warning": 0}}],
+        "mystnodes": {"accounts": [], "nodes": [], "local_matches": {}, "node_details": {"nodes": {}}},
+    })
+    store.append_snapshot({
+        "generated_at": "2026-06-26T10:00:00+05:30",
+        "collection_counts": {"myst": 1, "mystnodes": 0, "prometheus": 0, "snmp": 0},
+        "nodes": [{"name": "Node One", "running": True, "restart_count": 1, "uptime_seconds": 200, "log_counts": {"error_or_warning": 0}}],
+        "mystnodes": {"accounts": [], "nodes": [], "local_matches": {}, "node_details": {"nodes": {}}},
+    })
+
+    response = _get(app, "/api/v1/history/nodes/Node?limit=10&hours=24")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["hours"] == 24
+    assert payload["count"] == 2
+
+
 def test_metrics_alias_remains_available(tmp_path: Path) -> None:
     config = _test_config(tmp_path)
     app = create_app(config)
