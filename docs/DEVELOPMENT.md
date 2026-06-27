@@ -1,6 +1,6 @@
 # Development Setup
 
-This project uses a normal local Python workflow for development. In this repo, WSL is the default development environment, but the same source setup also works on a standard Linux host.
+This project uses a normal local Python workflow for development. In this repo, WSL is the default development environment, but the same source setup also works on a standard Linux host. HP400 is reserved for compose-managed end-of-pass verification only.
 
 ## Local Source Setup
 
@@ -14,6 +14,7 @@ python3 -m venv .venv
 
 Use a single runtime config file: `config.yaml`.
 If an older `config.local.yaml` exists from a previous setup, move any required values into `config.yaml` and delete the old file.
+Do not add static local runtime IPs to the config. Local runtime coverage is derived from live portal `localIp` data and stored history.
 
 Verify imports:
 
@@ -47,3 +48,5 @@ Shell syntax validation:
 ```bash
 bash -n ops/build-on-linux.sh ops/install-remote.sh ops/validate-mystmon.sh
 ```
+
+Compose-managed preview/validation on HP400 uses `/mnt/ssd/projects/mystmon-dev/docker-compose.yml` and the published `ghcr.io/sundeepgoel72/mystmon:dev` image.

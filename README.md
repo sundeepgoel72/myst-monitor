@@ -17,7 +17,7 @@ MystMon is a read-only monitoring service for MYST nodes. It collects runtime an
 
 ## How To Deploy And Run
 
-Use Docker for normal operation.
+Use `docker compose` for normal operation.
 
 For a normal install, pull a specific released version. The current example version is `0.11`:
 
@@ -112,6 +112,8 @@ The password environment variables are not part of the simple `0.11` example bec
 
 The root-level `.env` file from older deployment flows is obsolete and should not be used for a normal `0.11` install.
 
+For preview or validation deployments, use `docker-compose.dev.yml` with the `dev` image tag. On HP400 the live `_dev` instance is compose-managed under `/mnt/ssd/projects/mystmon-dev` and pulls `ghcr.io/sundeepgoel72/mystmon:dev`.
+
 Health check:
 
 ```bash
@@ -137,6 +139,7 @@ For source-based setup, testing, and developer workflow, see [docs/DEVELOPMENT.m
 - Both shipped compose samples include a container healthcheck against `/health`.
 - Versioning starts at `0.1` and increments by `0.01` for each minor release.
 - If the package page shows stale metadata, check the latest `Publish Docker Image` workflow run first. GHCR metadata updates only after a successful image push.
+- `_dev` on HP400 is expected to run from a compose file and pull the published `dev` image, not from a local build.
 
 ## Documentation
 

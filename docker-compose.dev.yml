@@ -2,6 +2,17 @@ services:
   mystmon-dev:
     image: ${MYSTMON_IMAGE:-ghcr.io/sundeepgoel72/mystmon:dev}
     container_name: mystmon-dev
+    ports:
+      - "8073:8072"
+    environment:
+      MYSTMON_CONFIG: /app/config.yaml
+      MYSTMON_HOST: 0.0.0.0
+      MYSTMON_PORT: 8072
+      MYSTMON_DATA_DIR: /data/mystmon
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/data/mystmon
+    restart: unless-stopped
     healthcheck:
       test:
         - CMD-SHELL

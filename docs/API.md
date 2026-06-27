@@ -47,7 +47,7 @@ Returns generic readings held in memory from optional Prometheus/SNMP polling.
 
 ## `GET /api/v1/snapshot`
 
-Returns the latest JSON snapshot file. This remains useful for debugging and exports, but it is not the preferred source for UI rendering.
+Returns the latest JSON snapshot file. This remains useful for debugging and exports, but it is not the preferred source for UI rendering. The browser UI reads from SQLite-backed history via `/api/v1/ui/home` and `/api/v1/history/nodes/{node}`.
 
 ## `POST /api/v1/collect`
 
@@ -74,6 +74,10 @@ Returns the latest SQLite-backed per-node metrics. Use `latest_only=false&limit=
 Returns SQLite-backed history for one node. `{node}` may be the node key, identity, exact node name, container name, or part of the node name.
 
 Use `hours` for preset range filtering in the UI such as `24`, `168`, and `720`.
+
+## `GET /api/v1/ui/home`
+
+Returns the Home screen payload backed by SQLite history, including wallet summary data and the current node table.
 
 ## `GET /metrics`
 
